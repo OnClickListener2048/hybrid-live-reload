@@ -1,6 +1,5 @@
 package com.example.hybriddebug
 
-import android.util.Base64
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,17 +16,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.DigestOutputStream
-import java.security.KeyFactory
 import java.security.MessageDigest
-import java.security.Signature
-import java.security.spec.X509EncodedKeySpec
 import java.util.Locale
 import java.util.zip.ZipFile
 
 /**
  * Downloads latest.json and installs the new version.
  *
- * When the active version has a matching signed patch, only changed files are
+ * When the active version has a matching patch, only changed files are
  * downloaded and merged into a copy of the active version. Any patch failure
  * falls back to the full bundle. Nothing is served until the resulting tree
  * passes per-file verification and is activated atomically.
@@ -81,9 +77,6 @@ internal object BundleInstaller {
         val version = latest.getString("version")
         if (!BundleStore.isValidVersion(version)) {
             throw IOException("服务器返回了非法版本号")
-        }
-        if (DevShellConfig.BUNDLE_KEY_ID != latest.optString("keyId")) {
-            throw IOException("未知签名 keyId：${latest.optString("keyId")}")
         }
 
         val active = store.getActiveVersion()
@@ -157,9 +150,6 @@ internal object BundleInstaller {
         if (baseVersion != patch.optString("baseVersion")) {
             throw IOException("补丁基础版本和当前版本不一致")
         }
-        if (DevShellConfig.BUNDLE_KEY_ID != patch.optString("keyId")) {
-            throw IOException("未知补丁 keyId")
-        }
 
         val manifestUrl = sameOriginUrl(
             baseUrl,
@@ -176,11 +166,6 @@ internal object BundleInstaller {
             token,
             "补丁 manifest",
             MAX_MANIFEST_BYTES,
-        )
-        verifySignature(
-            patchManifestBytes,
-            patch.getString("signature"),
-            "补丁 manifest",
         )
 
         val patchManifest = JSONObject(
@@ -290,7 +275,7 @@ internal object BundleInstaller {
                 }
             }
 
-            // Extract only the files declared as changed in the signed manifest.
+            // Extract only the files declared as changed in the patch manifest.
             val extracted = HashSet<String>()
             ZipFile(patchZipFile).use { zip ->
                 val entries = zip.entries()
@@ -397,7 +382,6 @@ internal object BundleInstaller {
     ): SyncResult {
         val zipUrl = sameOriginUrl(baseUrl, latest.getString("bundle"), "bundle")
         val expectedZipSha = latest.getString("sha256").lowercase(Locale.US)
-        val signature = latest.getString("signature")
         val declaredZipSize = latest.optLong("size", -1)
         val fullSize = declaredZipSize
 
@@ -433,7 +417,6 @@ internal object BundleInstaller {
                     zip.getInputStream(manifestEntry),
                     MAX_MANIFEST_BYTES,
                 )
-                verifySignature(manifestBytes, signature, "manifest")
 
                 val manifest = JSONObject(
                     String(manifestBytes, StandardCharsets.UTF_8),
@@ -643,30 +626,6 @@ internal object BundleInstaller {
         if (sha256File(file) != expectedHash) {
             throw IOException("文件 SHA-256 校验失败：$name")
         }
-    }
-
-    @Throws(Exception::class)
-    private fun verifySignature(
-        data: ByteArray,
-        signatureBase64: String,
-        label: String,
-    ) {
-        val publicKeyBytes = Base64.decode(
-            DevShellConfig.BUNDLE_PUBLIC_KEY_BASE64,
-            Base64.DEFAULT,
-        )
-        val publicKey = KeyFactory.getInstance("EC").generatePublic(
-            X509EncodedKeySpec(publicKeyBytes),
-        )
-        val verifier = Signature.getInstance("SHA256withECDSA")
-        verifier.initVerify(publicKey)
-        verifier.update(data)
-        val ok = try {
-            verifier.verify(Base64.decode(signatureBase64, Base64.DEFAULT))
-        } catch (_: Exception) {
-            false
-        }
-        if (!ok) throw IOException("$label 签名校验失败")
     }
 
     @Throws(IOException::class)

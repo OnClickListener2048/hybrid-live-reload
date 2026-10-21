@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 /**
  * DevShell: a development-only wrapper around the production WebView.
  *
- * It downloads a signed bundle over the LAN, activates it atomically, and
+ * It downloads a bundle over the LAN, activates it atomically, and
  * serves its static files while the WebView URL stays on the production origin.
  */
 class DevShellActivity : Activity() {

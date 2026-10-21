@@ -16,6 +16,3 @@ local.properties
 
 .env
 .env.*
-
-# Local demo signing key; generate with `npm run key:generate`
-demo/dev-keys/bundle-signing-key.pem

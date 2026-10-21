@@ -5,12 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const JSZip = require('jszip');
-const {
-  buildBundle,
-  publicKeyBase64,
-  DEFAULT_SOURCE,
-  DEFAULT_KEY,
-} = require('../core/bundle-builder');
+const { buildBundle, DEFAULT_SOURCE } = require('../core/bundle-builder');
 const { createBundleServer } = require('../core/bundle-server');
 
 let passed = 0;
@@ -44,7 +39,6 @@ async function main() {
       sourceDir,
       outDir,
       version: 'v1',
-      keyPath: DEFAULT_KEY,
     });
 
     // Change one source file so v2 has a small, predictable patch from v1.
@@ -56,7 +50,6 @@ async function main() {
       sourceDir,
       outDir,
       version: 'v2',
-      keyPath: DEFAULT_KEY,
     });
 
     bundleServer = createBundleServer({
@@ -83,11 +76,6 @@ async function main() {
     check('latest.json returns 200', latestRes.status === 200, `HTTP ${latestRes.status}`);
     const remoteLatest = await latestRes.json();
     check('latest version is v2', remoteLatest.version === 'v2', remoteLatest.version);
-    check(
-      'latest keyId is pinned demo key',
-      remoteLatest.keyId === 'demo-dev-1',
-      remoteLatest.keyId
-    );
     check('latest hash matches local build', remoteLatest.sha256 === latest.sha256);
 
     const zipRes = await fetch(`${base}/${remoteLatest.bundle}`, {
@@ -102,19 +90,6 @@ async function main() {
 
     const zip = await JSZip.loadAsync(zipBuffer);
     const manifestBytes = await zip.file('manifest.json').async('nodebuffer');
-    const publicKey = crypto.createPublicKey({
-      key: Buffer.from(publicKeyBase64(DEFAULT_KEY), 'base64'),
-      format: 'der',
-      type: 'spki',
-    });
-    const signatureValid = crypto.verify(
-      'sha256',
-      manifestBytes,
-      publicKey,
-      Buffer.from(remoteLatest.signature, 'base64')
-    );
-    check('manifest signature verifies with pinned key', signatureValid);
-
     const manifest = JSON.parse(manifestBytes.toString('utf8'));
     let hashesOk = true;
     for (const [name, info] of Object.entries(manifest.files)) {
@@ -168,15 +143,6 @@ async function main() {
     );
     check('patch zip size matches latest.json', patchZipBuffer.length === patch.size);
     check('patch zip SHA-256 matches latest.json', sha256(patchZipBuffer) === patch.sha256);
-    check(
-      'patch manifest signature verifies',
-      crypto.verify(
-        'sha256',
-        patchManifestBytes,
-        publicKey,
-        Buffer.from(patch.signature, 'base64')
-      )
-    );
     check(
       'patch manifest targets v2 from v1',
       patchManifest.version === 'v2' && patchManifest.baseVersion === 'v1'

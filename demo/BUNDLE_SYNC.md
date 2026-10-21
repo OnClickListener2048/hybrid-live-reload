@@ -1,4 +1,4 @@
-# 签名包同步 Demo（Android）
+# 包同步 Demo（Android）
 
 这个 demo 演示包同步方案：**不重打 Native 包，把 Web 构建产物同步到手机，DevShell 用生产 origin 加载手机本地文件；有旧版本时只下载变化文件。**
 
@@ -28,9 +28,6 @@
 cd demo
 npm install
 
-# 首次运行或换 key：生成本地 demo 签名私钥，并更新 pin 的公钥
-npm run key:generate
-
 # 桌面控制台（QR 码、配对链接、构建按钮、日志）
 npm run bundle:demo
 
@@ -51,7 +48,7 @@ npm run bundle:headless
 
 ```bash
 npm run bundle:build    # 只构建，不启动服务
-npm run bundle:smoke    # 26 项包格式 / 签名 / 下载 / 增量补丁校验
+npm run bundle:smoke    # 23 项包格式 / SHA-256 / 下载 / 增量补丁校验
 ```
 
 ---
@@ -63,8 +60,7 @@ npm run bundle:smoke    # 26 项包格式 / 签名 / 下载 / 增量补丁校验
 │ desktop-bundle (Electron)                     │  LAN   │ DevShell APK                      │
 │   :9090  latest.json / bundle.zip / manifest  │ ◄────► │  1. 带 token 拉 latest.json       │
 │   :8080  mock 生产页 + /api                    │        │  2. 下载 zip，验 SHA-256          │
-│                                               │        │  3. 验 manifest 的 ECDSA 签名      │
-│                                               │        │  4. 逐文件验 hash，原子切换版本    │
+│                                               │        │  3. 逐文件验 hash，原子切换版本    │
 │                                               │        │  5. WebView 打开生产 URL          │
 │                                               │        │     /sso?token=...                │
 │                                               │        │  6. 静态资源 → 本地包              │
@@ -186,19 +182,18 @@ hybriddemo-dev://sync?server=http%3A%2F%2F192.168.1.102%3A9090&token=demo-sync-t
 }
 ```
 
-`latest.json` 额外包含 zip 的大小、SHA-256、`keyId` 和 ECDSA 签名。
+`latest.json` 额外包含 zip 的大小和 SHA-256。这个 demo 不做签名：SHA-256 只能校验下载是否完整，不能证明包来自可信的构建方。真实环境应在发布流水线里签名，并由 DevShell 内置公钥验签。
 
 手机端的安装流程（[`BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt)）：
 
 1. 带 `Authorization` / token 请求 `latest.json`；
-2. 校验格式、`keyId`、版本号、bundle 路径，以及 URL 是否属于同步服务器；
+2. 校验格式、版本号、bundle 路径，以及 URL 是否属于同步服务器；
 3. 下载 zip，校验大小和整体 SHA-256；
-4. 用 DevShell 里 pin 住的 ECDSA P-256 公钥验证 manifest 签名；
-5. 校验 manifest 的 version、entry、文件列表；
-6. 解压时拒绝路径穿越、重复条目、未知文件和超限大小；
-7. 逐文件校验 size 和 SHA-256；
-8. 解压到临时目录，完成后原子 rename 成 `versions/<version>`；
-9. 原子切换 `active` / `previous` 指针。
+4. 校验 manifest 的 version、entry、文件列表；
+5. 解压时拒绝路径穿越、重复条目、未知文件和超限大小；
+6. 逐文件校验 size 和 SHA-256；
+7. 解压到临时目录，完成后原子 rename 成 `versions/<version>`；
+8. 原子切换 `active` / `previous` 指针。
 
 文件布局：
 
@@ -226,17 +221,15 @@ files/hybrid-debug/tmp/…                  # 下载/解压临时目录
     "zip": "bundles/v3/patch-from-v2.zip",
     "size": 1756,
     "fullSize": 5129,
-    "sha256": "...",
-    "keyId": "demo-dev-1",
-    "signature": "..."
+    "sha256": "..."
   }
 }
 ```
 
-补丁 manifest 同样用 ECDSA 签名，里面包含**目标版本的完整文件表**，以及 `changed` / `removed` 列表。这样手机可以只下载变化文件，但仍然能验证最终整棵树：
+补丁 manifest 里包含**目标版本的完整文件表**，以及 `changed` / `removed` 列表。这样手机可以只下载变化文件，但仍然能验证最终整棵树：
 
 1. 当前 active 版本等于 `patch.baseVersion` 时才尝试补丁；
-2. 下载 `patch-from-<base>.json`，用 pin 住的公钥验签；
+2. 下载 `patch-from-<base>.json`，校验格式、版本和文件表；
 3. 校验目标版本、基础版本、entry、`changed` / `removed` 与完整文件表；
 4. 下载 patch zip，校验大小和 SHA-256；
 5. 把 active 版本里**未变化**的文件复制到 staging；
@@ -244,7 +237,7 @@ files/hybrid-debug/tmp/…                  # 下载/解压临时目录
 7. 对 staging 里的**所有目标文件**逐个校验 size 和 SHA-256；
 8. 原子切换版本；`removed` 的文件因为不会被复制，自然消失。
 
-任何一步失败（没有匹配补丁、下载失败、签名/hash 不对、基础版本文件损坏等），都会自动回退到完整包重新安装。完整包仍然走原来的签名 + 逐文件校验流程，所以回退不会降低安全性。
+任何一步失败（没有匹配补丁、下载失败、hash 不对、基础版本文件损坏等），都会自动回退到完整包重新安装。完整包仍然走整体 SHA-256 + 逐文件校验流程。
 
 实测 v2 → v3 只改 `app.js` 时：
 
@@ -307,20 +300,11 @@ electron desktop-bundle/main.js --source ../your-app/dist
 
 > Vite 的 hashed 文件名每次构建都会变，补丁会把旧 hash 文件记为删除、新 hash 文件记为新增；这是文件级补丁的正常行为。真实工程可以固定入口文件名，或者接受这个体积开销。
 
-### 签名 key
+### 关于签名
 
-仓库只提交公钥，签名私钥在本地生成，不会进入 Git：
+这个 demo 刻意不包含任何 key 或签名代码，只做 SHA-256 完整性校验。它能发现传输损坏和文件不一致，但**不能防伪造**：任何能访问同步服务器的人都可以替换 bundle。
 
-```bash
-cd demo
-npm run key:generate
-```
-
-脚本会生成 `dev-keys/bundle-signing-key.pem`（已 gitignore）、更新公钥文件，并同步修改
-[`DevShellConfig.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellConfig.kt)
-里 pin 的 `BUNDLE_PUBLIC_KEY_BASE64`。生成后需要重新构建 DevShell APK。
-
-真实环境应把私钥放在 CI / KMS，由发布流水线签名；DevShell 只内置公钥。详见 [`dev-keys/README.md`](dev-keys/README.md)。
+真实环境不要把签名私钥放进 App 仓库或桌面端，应放在 CI / KMS；发布流水线对 manifest 签名，DevShell 只内置公钥并验签。
 
 ---
 
@@ -342,7 +326,7 @@ dependencies {
 }
 ```
 
-- `production` 不依赖 `web-debug-plugin`，没有 `DevShellActivity`、拦截器、同步逻辑和 pin 的公钥；
+- `production` 不依赖 `web-debug-plugin`，没有 `DevShellActivity`、拦截器或同步逻辑；
 - `devShell` 才包含插件，并且单独包名，不会覆盖生产包；
 - DevShell 的 `main` Activity 在 `src/devShell/AndroidManifest.xml` 里被禁用，启动器只显示 DevShell。
 
@@ -368,7 +352,7 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 
 ## 6. 已验证内容
 
-- `npm run bundle:smoke`：26/26 通过（token 鉴权、latest、zip 大小/SHA-256、签名、逐文件 hash、注入的 build-info、路径穿越、错误 token、补丁文件表/签名/体积，以及用 v1 + patch 重建 v2 全量文件树）。
+- `npm run bundle:smoke`：23/23 通过（token 鉴权、latest、zip 大小/SHA-256、逐文件 hash、注入的 build-info、路径穿越、错误 token、补丁文件表/体积，以及用 v1 + patch 重建 v2 全量文件树）。
 - Android 构建：Kotlin 2.1.0，`npm run android:build:all` 成功，production / devShell 两个 APK 均产出。
 - Android 模拟器（Kotlin DevShell）：安装新 APK → 深链配对 → 从 v4 应用补丁到 React v6 → 页面显示 **REACT + VITE** / `bundle v6`，`/api/me` 返回 200，localStorage 计数 10 保留。
 - 补丁成功路径（Kotlin 客户端）：`已应用补丁 v6（3 个变化文件，删除 1 个，70.2 KiB；完整包 72.2 KiB，节省 2.0 KiB）；上一版 v4`。
@@ -399,18 +383,17 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 
 | 文件 | 作用 |
 | --- | --- |
-| [`core/bundle-builder.js`](core/bundle-builder.js) | 构建 manifest、zip、增量补丁、签名和 latest.json |
+| [`core/bundle-builder.js`](core/bundle-builder.js) | 构建 manifest、zip、增量补丁和 latest.json |
 | [`core/bundle-server.js`](core/bundle-server.js) | 带 token 的 LAN 包服务器（完整包 + patch） |
 | [`core/bundle-orchestrator.js`](core/bundle-orchestrator.js) | 启停 8080 / 9090，生成配对链接 |
 | [`desktop-bundle/main.js`](desktop-bundle/main.js) | Electron 控制台主进程 |
 | [`desktop-bundle/renderer/app.js`](desktop-bundle/renderer/app.js) | 控制台 UI：QR、状态、补丁信息、构建、日志 |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 26 项包与补丁校验测试 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 23 项包与补丁校验测试 |
 | [`web/bundle/app.js`](web/bundle/app.js) | 手机页面；改 `BUNDLE_NOTE` 体验版本更新 |
 | [`web-react/`](web-react) | 可切换的 React + Vite source，验证真实构建产物 |
 | [`web-debug-plugin/.../DevShellActivity.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellActivity.kt) | DevShell UI、配对、同步、回滚 |
-| [`web-debug-plugin/.../BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt) | 下载、验签、校验、安装 |
+| [`web-debug-plugin/.../BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt) | 下载、SHA-256 校验、安装 |
 | [`web-debug-plugin/.../BundleStore.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleStore.kt) | 版本目录与 active/previous 指针 |
 | [`web-debug-plugin/.../LocalBundleWebViewClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/LocalBundleWebViewClient.kt) | 生产 origin 静态资源拦截 |
-| [`web-debug-plugin/.../DevShellConfig.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellConfig.kt) | 演示配置与 pin 的签名公钥 |
+| [`web-debug-plugin/.../DevShellConfig.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellConfig.kt) | 演示配置 |
 | [`app/.../MainActivity.kt`](app-android/app/src/main/kotlin/com/example/hybriddemo/MainActivity.kt) | 生产 WebView 壳（Kotlin） |
-| [`dev-keys/README.md`](dev-keys/README.md) | demo 签名 key 的生成与安全说明 |

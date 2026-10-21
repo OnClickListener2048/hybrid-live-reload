@@ -15,11 +15,5 @@ object DevShellConfig {
      */
     const val ENTRY_PATH = "/sso"
 
-    /** Must match dev-keys/bundle-signing-key.pub.base64 in the demo repo. */
-    const val BUNDLE_PUBLIC_KEY_BASE64 =
-        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE336J5RpFxACvPtlAYI9bX0wXf/qH6rYKHfZ/irNBnZ1enk5bY9/NsJdi4gdttWC6cvySGdimv5pE1dzae8K4vA=="
-
-    const val BUNDLE_KEY_ID = "demo-dev-1"
-
     const val USER_AGENT_SUFFIX = " HybridDevShell/0.1"
 }

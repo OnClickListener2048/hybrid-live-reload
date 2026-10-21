@@ -7,8 +7,6 @@ const JSZip = require('jszip');
 
 const DEFAULT_SOURCE = path.join(__dirname, '..', 'web', 'bundle');
 const DEFAULT_OUT = path.join(__dirname, '..', 'dist');
-const DEFAULT_KEY = path.join(__dirname, '..', 'dev-keys', 'bundle-signing-key.pem');
-const KEY_ID = 'demo-dev-1';
 const FORMAT = 1;
 
 function sha256(buf) {
@@ -73,19 +71,10 @@ function listFiles(root, base = root) {
   return out;
 }
 
-function publicKeyBase64(keyPath = DEFAULT_KEY) {
-  const privateKey = crypto.createPrivateKey(fs.readFileSync(keyPath, 'utf8'));
-  return crypto
-    .createPublicKey(privateKey)
-    .export({ type: 'spki', format: 'der' })
-    .toString('base64');
-}
-
 async function buildBundle({
   sourceDir = DEFAULT_SOURCE,
   outDir = DEFAULT_OUT,
   version,
-  keyPath = DEFAULT_KEY,
   logger = () => {},
 } = {}) {
   const finalVersion = version || nextVersion(outDir);
@@ -146,9 +135,6 @@ async function buildBundle({
     platform: 'UNIX',
   });
 
-  const privateKey = crypto.createPrivateKey(fs.readFileSync(keyPath, 'utf8'));
-  const signature = crypto.sign('sha256', manifestBytes, privateKey).toString('base64');
-
   const buildDir = path.join(outDir, 'bundles', finalVersion);
   fs.mkdirSync(buildDir, { recursive: true });
   fs.writeFileSync(path.join(buildDir, 'manifest.json'), manifestBytes);
@@ -169,7 +155,6 @@ async function buildBundle({
       targetManifest: manifest,
       contents,
       buildDir,
-      privateKey,
       fullSize: zipBuffer.length,
     });
     if (patch) patches[baseVersion] = patch;
@@ -185,8 +170,6 @@ async function buildBundle({
     manifest: `bundles/${finalVersion}/manifest.json`,
     size: zipBuffer.length,
     sha256: sha256(zipBuffer),
-    keyId: KEY_ID,
-    signature,
     patches,
   };
 
@@ -222,7 +205,6 @@ async function buildPatchForBase({
   targetManifest,
   contents,
   buildDir,
-  privateKey,
   fullSize,
 }) {
   const baseFiles = baseManifest.files || {};
@@ -287,10 +269,6 @@ async function buildPatchForBase({
     size: zipBuffer.length,
     fullSize,
     sha256: sha256(zipBuffer),
-    keyId: KEY_ID,
-    signature: crypto
-      .sign('sha256', manifestBytes, privateKey)
-      .toString('base64'),
   };
 }
 
@@ -316,7 +294,6 @@ if (require.main === module) {
   buildBundle({
     sourceDir: args.source ? path.resolve(args.source) : DEFAULT_SOURCE,
     outDir: args.out ? path.resolve(args.out) : DEFAULT_OUT,
-    keyPath: args.key ? path.resolve(args.key) : DEFAULT_KEY,
     version: typeof args.version === 'string' ? args.version : undefined,
     logger: console.log,
   })
@@ -333,10 +310,7 @@ module.exports = {
   buildBundle,
   readLatest,
   nextVersion,
-  publicKeyBase64,
   sha256,
   DEFAULT_SOURCE,
   DEFAULT_OUT,
-  DEFAULT_KEY,
-  KEY_ID,
 };

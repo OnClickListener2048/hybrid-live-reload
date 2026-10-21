@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
-  "description": "Runnable demos: same-origin live reload and signed bundle sync for WebView apps",
+  "description": "Runnable demos: same-origin live reload and hash-verified bundle sync for WebView apps",
   "main": "desktop/main.js",
   "scripts": {
     "desktop": "electron .",
@@ -13,7 +13,6 @@
     "bundle:headless": "node scripts/bundle-demo-headless.js",
     "bundle:build": "node core/bundle-builder.js",
     "bundle:build:react": "npm --prefix web-react run build && node core/bundle-builder.js --source web-react/dist",
-    "key:generate": "node scripts/generate-demo-key.js",
     "bundle:demo:react": "electron desktop-bundle/main.js --source web-react/dist",
     "bundle:headless:react": "node scripts/bundle-demo-headless.js --source web-react/dist",
     "bundle:smoke": "node scripts/bundle-smoke.js",
