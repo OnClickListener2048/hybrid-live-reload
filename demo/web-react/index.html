@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>React Bundle · Hybrid DevShell</title>
+    <!--
+      In `vite dev` this comes from public/build-info.js.
+      At bundle time core/bundle-builder.js skips that placeholder and injects
+      the real version / builtAt into the produced bundle.
+    -->
+    <script src="/build-info.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

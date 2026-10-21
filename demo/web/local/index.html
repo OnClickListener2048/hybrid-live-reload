@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid Demo · Local Dev</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="local">
+  <script>window.__SERVED_BY__ = 'LOCAL DEV';</script>
+  <main class="app">
+    <header class="hero">
+      <div class="badge local">LOCAL DEV · :3000</div>
+      <h1>Hybrid Live Reload Demo</h1>
+      <p class="sub">这个页面由本地 dev server 返回，但地址栏仍然是生产 URL。改代码不用重新打包。</p>
+    </header>
+
+    <section class="card">
+      <h2>环境信息</h2>
+      <dl class="kv">
+        <dt>location.origin</dt><dd id="origin">—</dd>
+        <dt>location.href</dt><dd id="href">—</dd>
+        <dt>页面来源</dt><dd id="served">—</dd>
+        <dt>登录状态</dt><dd id="auth" class="muted">检查中…</dd>
+        <dt>可见 Cookie</dt><dd id="cookie">—</dd>
+      </dl>
+    </section>
+
+    <section class="card live">
+      <h2>实时更新测试</h2>
+      <p class="hint">打开 <code>demo/web/local/app.js</code>，修改 <code>LOCAL_NOTE</code> 或 <code>LOCAL_VERSION</code>，保存后这个页面会自动刷新。</p>
+      <dl class="kv">
+        <dt>本地版本</dt><dd id="local-version">—</dd>
+        <dt>页面加载时间</dt><dd id="loaded-at">—</dd>
+        <dt>本地备注</dt><dd id="note">—</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>操作</h2>
+      <div class="actions">
+        <button id="login" class="primary">登录（走 SSO）</button>
+        <button id="logout" class="secondary">退出</button>
+        <button id="ping" class="secondary">调用 /api/health</button>
+        <button id="clear" class="secondary">清 Cookie</button>
+      </div>
+      <pre id="output" class="output">等待操作…</pre>
+    </section>
+
+    <footer class="foot">
+      本地页面 · 通过代理映射到生产 URL；API 和 IdP 仍然打到真实服务器。
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

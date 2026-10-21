@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/hybrid_debug_bg"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="10dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hybrid DevShell"
+                android:textColor="@color/hybrid_debug_text"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/active_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="本地包 — · 生产模式"
+                android:textColor="@color/hybrid_debug_accent"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/toggle_panel_button"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:backgroundTint="@color/hybrid_debug_panel"
+            android:minWidth="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="收起"
+            android:textAllCaps="false"
+            android:textColor="@color/hybrid_debug_text"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/dev_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/hybrid_debug_panel"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="9dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="9dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="生产 origin（DevShell 只替换这个 origin 下的静态文件）"
+            android:textColor="@color/hybrid_debug_muted"
+            android:textSize="9.5sp" />
+
+        <EditText
+            android:id="@+id/prod_input"
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:layout_marginTop="3dp"
+            android:backgroundTint="@color/hybrid_debug_accent"
+            android:hint="http://10.0.2.2:8080"
+            android:inputType="textUri"
+            android:maxLines="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textColor="@color/hybrid_debug_text"
+            android:textColorHint="@color/hybrid_debug_muted"
+            android:textSize="11.5sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="同步服务器 / 一次性 token（扫码会自动填）"
+            android:textColor="@color/hybrid_debug_muted"
+            android:textSize="9.5sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:layout_marginTop="3dp"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/server_input"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:backgroundTint="@color/hybrid_debug_accent"
+                android:hint="http://10.0.2.2:9090"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:textColor="@color/hybrid_debug_text"
+                android:textColorHint="@color/hybrid_debug_muted"
+                android:textSize="11.5sp" />
+
+            <EditText
+                android:id="@+id/token_input"
+                android:layout_width="112dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:backgroundTint="@color/hybrid_debug_accent"
+                android:hint="token"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:textColor="@color/hybrid_debug_text"
+                android:textColorHint="@color/hybrid_debug_muted"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/sync_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:backgroundTint="@color/hybrid_debug_accent"
+                android:text="同步最新包"
+                android:textAllCaps="false"
+                android:textColor="@color/hybrid_debug_bg"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/rollback_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/hybrid_debug_bg"
+                android:text="回滚上一版"
+                android:textAllCaps="false"
+                android:textColor="@color/hybrid_debug_text"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/local_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:backgroundTint="@color/hybrid_debug_bg"
+                android:text="加载本地包"
+                android:textAllCaps="false"
+                android:textColor="@color/hybrid_debug_text"
+                android:textSize="10.5sp" />
+
+            <Button
+                android:id="@+id/prod_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/hybrid_debug_bg"
+                android:text="加载生产页"
+                android:textAllCaps="false"
+                android:textColor="@color/hybrid_debug_text"
+                android:textSize="10.5sp" />
+
+            <Button
+                android:id="@+id/clear_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="5dp"
+                android:layout_weight="0.8"
+                android:backgroundTint="@color/hybrid_debug_bg"
+                android:text="清除"
+                android:textAllCaps="false"
+                android:textColor="@color/hybrid_debug_muted"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/status_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:lineSpacingExtra="1.5dp"
+            android:maxLines="5"
+            android:scrollbars="vertical"
+            android:text="准备中…"
+            android:textColor="@color/hybrid_debug_muted"
+            android:textSize="9.5sp" />
+    </LinearLayout>
+
+    <WebView
+        android:id="@+id/web_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/hybrid_debug_bg" />
+
+</LinearLayout>

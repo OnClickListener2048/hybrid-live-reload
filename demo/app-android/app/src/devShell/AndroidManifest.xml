@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!-- DevShell uses the plugin activity as its launcher. Keep the plain
+             demo shell out of the launcher so there is only one app icon. -->
+        <activity
+            android:name=".MainActivity"
+            android:enabled="false" />
+
+    </application>
+
+</manifest>

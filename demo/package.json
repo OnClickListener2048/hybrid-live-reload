@@ -1,0 +1,34 @@
+{
+  "name": "hybrid-live-reload-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Runnable demos: same-origin live reload and signed bundle sync for WebView apps",
+  "main": "desktop/main.js",
+  "scripts": {
+    "desktop": "electron .",
+    "headless": "node scripts/headless.js",
+    "smoke": "node scripts/smoke-test.js",
+    "bundle:demo": "electron desktop-bundle/main.js",
+    "bundle:headless": "node scripts/bundle-demo-headless.js",
+    "bundle:build": "node core/bundle-builder.js",
+    "bundle:build:react": "npm --prefix web-react run build && node core/bundle-builder.js --source web-react/dist",
+    "key:generate": "node scripts/generate-demo-key.js",
+    "bundle:demo:react": "electron desktop-bundle/main.js --source web-react/dist",
+    "bundle:headless:react": "node scripts/bundle-demo-headless.js --source web-react/dist",
+    "bundle:smoke": "node scripts/bundle-smoke.js",
+    "react:install": "npm --prefix web-react install",
+    "react:build": "npm --prefix web-react run build",
+    "react:dev": "npm --prefix web-react run dev",
+    "android:build": "node scripts/build-android.js devShell",
+    "android:build:production": "node scripts/build-android.js production",
+    "android:build:all": "node scripts/build-android.js all"
+  },
+  "dependencies": {
+    "jszip": "^3.10.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^44.9.1"
+  }
+}

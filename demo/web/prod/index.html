@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid Demo · Production</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="prod">
+  <script>window.__SERVED_BY__ = 'PRODUCTION';</script>
+  <main class="app">
+    <header class="hero">
+      <div class="badge prod">PRODUCTION · :8080</div>
+      <h1>Hybrid Live Reload Demo</h1>
+      <p class="sub">这个页面由“生产服务器”返回。没有设置代理时，App 看到的就是这个版本。</p>
+    </header>
+
+    <section class="card">
+      <h2>环境信息</h2>
+      <dl class="kv">
+        <dt>location.origin</dt><dd id="origin">—</dd>
+        <dt>location.href</dt><dd id="href">—</dd>
+        <dt>页面来源</dt><dd id="served">—</dd>
+        <dt>登录状态</dt><dd id="auth" class="muted">检查中…</dd>
+        <dt>可见 Cookie</dt><dd id="cookie">—</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>操作</h2>
+      <div class="actions">
+        <button id="login" class="primary">登录（走 SSO）</button>
+        <button id="logout" class="secondary">退出</button>
+        <button id="ping" class="secondary">调用 /api/health</button>
+        <button id="clear" class="secondary">清 Cookie</button>
+      </div>
+      <pre id="output" class="output">等待操作…</pre>
+    </section>
+
+    <footer class="foot">
+      生产页面 · 打开桌面端的“手机（代理 ON）”窗口，同一 URL 会加载本地代码。
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

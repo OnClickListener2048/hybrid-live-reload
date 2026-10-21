@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+  >
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid DevShell · Bundle Sync</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">DS</div>
+      <div>
+        <h1>Hybrid DevShell</h1>
+        <p>Bundle Sync Console · Android 优先</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="status-pill" class="pill starting">
+        <span class="dot"></span>
+        <span id="status-text">启动中…</span>
+      </span>
+      <button id="btn-restart" class="ghost" type="button">重启服务</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel pair-panel">
+      <div class="panel-head">
+        <h2>手机配对</h2>
+        <span class="mini-tag">扫码 → 自动同步</span>
+      </div>
+
+      <div class="qr-wrap">
+        <div class="qr-box">
+          <img id="qr" alt="DevShell 配对二维码" width="230" height="230" hidden>
+          <span id="qr-placeholder" class="qr-placeholder">生成中…</span>
+        </div>
+      </div>
+
+      <p class="lede">
+        手机和电脑连同一个 Wi-Fi，用系统相机扫码。浏览器会打开配对页，
+        点「打开 Hybrid DevShell」后自动保存同步地址和 token，并下载最新包。
+      </p>
+
+      <div class="field">
+        <div class="field-label">
+          <span>真机配对链接</span>
+          <button id="copy-pair" class="link-btn" type="button">复制</button>
+        </div>
+        <code id="pair-link" class="code-block">—</code>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <span>模拟器深链</span>
+          <button id="copy-emulator" class="link-btn" type="button">复制</button>
+        </div>
+        <code id="emulator-link" class="code-block">—</code>
+      </div>
+
+      <div class="token-row">
+        <span class="label">同步 token</span>
+        <code id="sync-token">—</code>
+      </div>
+
+      <div id="lan-warning" class="notice" hidden>
+        未检测到局域网 IP。真机扫码可能无法访问，请连接 Wi-Fi 后重启服务。
+      </div>
+    </section>
+
+    <section class="panel latest-panel">
+      <div class="panel-head">
+        <h2>当前发布包</h2>
+        <span id="build-state" class="mini-tag">latest</span>
+      </div>
+
+      <div class="version-hero">
+        <div>
+          <span class="eyebrow">LATEST VERSION</span>
+          <strong id="latest-version">—</strong>
+        </div>
+        <span id="latest-size" class="size-pill">—</span>
+      </div>
+
+      <dl class="meta">
+        <dt>构建时间</dt>
+        <dd id="latest-built-at">—</dd>
+        <dt>构建来源</dt>
+        <dd id="build-source" class="mono wrap">—</dd>
+        <dt>文件数</dt>
+        <dd id="latest-file-count">—</dd>
+        <dt>增量补丁</dt>
+        <dd id="latest-patches">—</dd>
+        <dt>zip SHA-256</dt>
+        <dd id="latest-sha" class="mono wrap">—</dd>
+        <dt>下载地址</dt>
+        <dd id="latest-url" class="mono wrap">—</dd>
+      </dl>
+
+      <div class="file-box">
+        <div class="file-head">包内文件</div>
+        <div id="file-list" class="file-list">—</div>
+      </div>
+
+      <div class="actions">
+        <button id="btn-build" class="primary" type="button">构建新版本</button>
+        <button id="btn-prod" class="secondary" type="button">打开生产页</button>
+      </div>
+      <p class="hint">
+        构建只更新桌面端发布目录；手机 DevShell 下次点「同步最新包」或重新扫码时才下载。
+        有匹配的旧版本时只下载变化文件，补丁失败会自动回退完整包。
+      </p>
+    </section>
+
+    <section class="panel steps-panel">
+      <div class="panel-head">
+        <h2>演示步骤</h2>
+        <span class="mini-tag">约 2 分钟</span>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <span class="step-title">配对</span>
+          手机扫码（或模拟器用深链）打开 DevShell，自动同步并加载
+          <span class="chip">LOCAL BUNDLE</span>。
+        </li>
+        <li>
+          <span class="step-title">确认 origin 没变</span>
+          页面地址仍是生产 origin <code>:8080/sso?token=…</code>，
+          但 HTML/JS/CSS 来自手机里的 bundle；<code>/api</code> 仍请求后端。
+        </li>
+        <li>
+          <span class="step-title">改代码</span>
+          编辑 <code>web/bundle/app.js</code> 里的
+          <code>BUNDLE_NOTE</code>，回到这里点「构建新版本」。
+        </li>
+        <li>
+          <span class="step-title">同步新包</span>
+          DevShell 点「同步最新包」，或重新扫码。有匹配的旧版本时只下载变化文件；
+          WebView 刷新后显示新文案，localStorage 里的计数不会丢。
+        </li>
+        <li>
+          <span class="step-title">回滚</span>
+          点「回滚上一版」立即切回旧 bundle，不需要重新下载。
+        </li>
+      </ol>
+    </section>
+
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <h2>服务日志</h2>
+        <span class="live-indicator"><span class="live-dot"></span>实时</span>
+      </div>
+      <pre id="logs" class="logs">等待日志…</pre>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Demo only · 下载包验签 + 同 origin 映射 · 生产构建不包含 web-debug-plugin
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

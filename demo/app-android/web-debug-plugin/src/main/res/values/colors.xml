@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hybrid_debug_bg">#07111D</color>
+    <color name="hybrid_debug_panel">#102235</color>
+    <color name="hybrid_debug_text">#E9F2FB</color>
+    <color name="hybrid_debug_muted">#94A9BF</color>
+    <color name="hybrid_debug_accent">#5EEAD4</color>
+    <color name="hybrid_debug_warn">#FBBF24</color>
+</resources>

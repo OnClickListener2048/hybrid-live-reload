@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+  >
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hybrid Live Reload · Demo Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">HL</div>
+      <div>
+        <h1>Hybrid Live Reload</h1>
+        <p>桌面控制台 · Same-Origin 演示</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="status-pill" class="pill starting">
+        <span class="dot"></span>
+        <span id="status-text">启动中…</span>
+      </span>
+      <button id="btn-restart" class="ghost" type="button">重启服务</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel phone-panel">
+      <div class="panel-head">
+        <h2>手机端</h2>
+        <span class="mini-tag">独立 session</span>
+      </div>
+      <p class="lede">
+        手机窗口的页面地址始终是生产 origin。代理开启时，静态资源被替换成本地 dev server
+        的内容，接口和 SSO 仍然请求真实后端。
+      </p>
+
+      <div class="qr-wrap">
+        <div class="qr-box">
+          <img id="qr" alt="手机访问地址二维码" width="200" height="200" hidden>
+          <span id="qr-placeholder" class="qr-placeholder">生成中…</span>
+        </div>
+        <div class="qr-side">
+          <div class="field">
+            <span class="label">访问地址（生产 origin）</span>
+            <code id="phone-url">—</code>
+          </div>
+          <div class="field">
+            <span class="label">手机 Wi-Fi 代理</span>
+            <code id="proxy-address">—</code>
+          </div>
+          <div class="btn-row">
+            <button id="btn-copy-url" class="ghost small" type="button">复制地址</button>
+            <button id="btn-copy-proxy" class="ghost small" type="button">复制代理</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="phone-actions">
+        <button id="btn-phone" class="primary" type="button">打开手机窗口</button>
+        <label class="switch">
+          <input id="proxy-toggle" type="checkbox" checked>
+          <span class="track"><span class="thumb"></span></span>
+          <span>手机窗口走本地代理</span>
+        </label>
+      </div>
+
+      <div id="lan-warning" class="notice" hidden>
+        未检测到局域网 IP，真机无法直接访问。请连接 Wi-Fi 后点「重启服务」。
+      </div>
+
+      <div class="hint">
+        真机演示：手机与电脑连同一 Wi-Fi，在 Wi-Fi 设置里手动填上面的代理地址，再打开访问地址。
+        本 demo 使用 HTTP，不需要安装证书。
+      </div>
+    </section>
+
+    <section class="panel links-panel">
+      <div class="panel-head">
+        <h2>链路</h2>
+        <span class="mini-tag">所有服务在本机</span>
+      </div>
+
+      <div class="links">
+        <div class="link-row">
+          <span class="tag prod">PROD</span>
+          <div class="link-meta">
+            <strong>生产站点 / 后端</strong>
+            <small id="prod-url">—</small>
+          </div>
+          <button class="ghost small" type="button" data-open="prod">打开</button>
+        </div>
+        <div class="link-row">
+          <span class="tag local">LOCAL</span>
+          <div class="link-meta">
+            <strong>本地 dev server</strong>
+            <small id="local-url">—</small>
+          </div>
+          <button class="ghost small" type="button" data-open="local">打开</button>
+        </div>
+        <div class="link-row">
+          <span class="tag idp">IDP</span>
+          <div class="link-meta">
+            <strong>模拟统一登录</strong>
+            <small id="idp-url">—</small>
+          </div>
+          <button class="ghost small" type="button" data-open="idp">打开</button>
+        </div>
+      </div>
+
+      <div class="route">
+        <div class="route-title">代理路由规则</div>
+        <ul>
+          <li><code>生产地址:8080</code> 下的 <code>/api</code>、<code>/oauth</code>、<code>/sso</code>、<code>/login</code> → <b>真实后端</b></li>
+          <li><code>生产地址:8080</code> 的其他请求 → <b>本地 dev server</b></li>
+          <li><code>生产地址:8081</code> → <b>模拟 IdP</b>，其他主机 → 直通</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel steps-panel">
+      <div class="panel-head">
+        <h2>演示步骤</h2>
+        <span class="mini-tag">约 1 分钟</span>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <span class="step-title">看本地代码</span>
+          打开手机窗口（代理默认开启），页面显示 <span class="chip local">LOCAL DEV</span>，
+          但地址栏仍是生产 origin。
+        </li>
+        <li>
+          <span class="step-title">走一遍 SSO</span>
+          点「登录」→ 模拟 IdP → 回到 <code>/callback?code=…</code>。回调页仍来自本地，
+          <code>/oauth/token</code> 已透传到生产后端。
+        </li>
+        <li>
+          <span class="step-title">切回生产</span>
+          关闭代理开关（自动刷新），页面变为 <span class="chip prod">PRODUCTION</span>，
+          登录态还在——Cookie 一直写在同一个 origin 下。
+        </li>
+        <li>
+          <span class="step-title">体验热刷新</span>
+          重新打开代理，编辑 <code>web/local/app.js</code> 里的
+          <code>LOCAL_NOTE</code> 并保存，手机页面会自动刷新。
+        </li>
+      </ol>
+
+      <div class="steps-actions">
+        <button id="btn-clear" class="ghost" type="button">清空登录态 / Cookie</button>
+        <span class="footnote">会同时清掉手机 session 和服务端内存 session。</span>
+      </div>
+    </section>
+
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <h2>服务日志</h2>
+        <span class="live-indicator"><span class="live-dot"></span>实时</span>
+      </div>
+      <pre id="logs" class="logs">等待日志…</pre>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Demo only · HTTP + 内置代理 · 真实方案使用 HTTPS + Whistle，原理相同：只换内容，不换 origin。
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

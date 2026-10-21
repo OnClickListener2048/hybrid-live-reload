@@ -1,0 +1,21 @@
+.DS_Store
+*.log
+
+node_modules/
+dist/
+build/
+
+.gradle/
+.kotlin/
+.idea/
+*.iml
+
+local.properties
+*.apk
+*.aab
+
+.env
+.env.*
+
+# Local demo signing key; generate with `npm run key:generate`
+demo/dev-keys/bundle-signing-key.pem

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hybrid DevShell · Bundle</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bundle">
+  <main class="app">
+    <header class="hero">
+      <div class="hero-row">
+        <span class="badge bundle">LOCAL BUNDLE</span>
+        <span class="badge soft" id="mode-label">DevShell</span>
+      </div>
+      <h1>下载包已接管页面</h1>
+      <p class="sub">
+        URL 仍然是生产 origin，页面文件来自手机里的 Web 包。接口请求照常走网络。
+      </p>
+      <div class="version" id="bundle-version">source</div>
+    </header>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>运行环境</h2>
+        <span class="tiny" id="loaded-at">—</span>
+      </div>
+      <dl class="kv">
+        <dt>location.origin</dt>
+        <dd id="origin">—</dd>
+        <dt>location.pathname</dt>
+        <dd id="pathname">—</dd>
+        <dt>页面来源</dt>
+        <dd id="served-by">—</dd>
+        <dt>WebView UA</dt>
+        <dd id="ua" class="wrap">—</dd>
+        <dt>构建时间</dt>
+        <dd id="built-at">—</dd>
+      </dl>
+    </section>
+
+    <section class="card accent-card">
+      <div class="card-head">
+        <h2>Native 注入的 Token</h2>
+        <span class="tiny">URL query</span>
+      </div>
+      <p class="muted">
+        Native 先请求接口拿到 token，再把它拼到 SSO 页面 URL 上打开 WebView。
+      </p>
+      <pre id="token" class="token">—</pre>
+      <div class="actions">
+        <button id="api-me" class="primary">带 token 调 /api/me</button>
+        <button id="api-health" class="secondary">调 /api/health</button>
+      </div>
+      <pre id="api-output" class="output">等待请求…</pre>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>同源 localStorage</h2>
+        <span class="tiny">切包不清空</span>
+      </div>
+      <p class="muted">
+        这些值存在生产 origin 下。同步新包、回滚旧包都不会丢，因为它不是文件的一部分。
+      </p>
+      <div class="counter-row">
+        <span class="counter" id="counter">0</span>
+        <span class="muted">次点击</span>
+        <button id="counter-btn" class="secondary small">+1</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>这次打包的说明</h2>
+        <span class="tiny">编辑后重新构建</span>
+      </div>
+      <p id="note" class="note">—</p>
+    </section>
+
+    <footer class="foot">
+      页面来自下载包 · API 来自 :8080 · origin 没有变化
+    </footer>
+  </main>
+  <script src="/build-info.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
