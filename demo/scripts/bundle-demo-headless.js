@@ -26,7 +26,6 @@ function printStatus(status) {
   console.log(`  Android emu prod: ${status.prodEmulatorUrl}`);
   console.log(`  bundle server   : ${status.bundleServerUrl}`);
   console.log(`  emulator sync   : ${status.bundleServerEmulatorUrl}`);
-  console.log(`  sync token      : ${status.syncToken}`);
   console.log(`  build source    : ${status.sourceLabel || '—'}`);
   console.log(`  latest          : ${status.latest ? status.latest.version : '(none)'}`);
   console.log('');

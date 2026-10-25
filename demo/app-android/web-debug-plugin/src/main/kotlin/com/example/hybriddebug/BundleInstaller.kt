@@ -57,16 +57,12 @@ internal object BundleInstaller {
     )
 
     @Throws(Exception::class)
-    fun install(store: BundleStore, rawBase: String?, token: String?): SyncResult {
+    fun install(store: BundleStore, rawBase: String?): SyncResult {
         val base = normalizeBase(rawBase)
-        if (token.isNullOrBlank()) {
-            throw IOException("缺少同步 token")
-        }
         val baseUrl = URL(base)
 
         val latestText = httpGetText(
             URL("$base/latest.json"),
-            token,
             "latest.json",
             MAX_LATEST_BYTES,
         )
@@ -109,7 +105,6 @@ internal object BundleInstaller {
                 return installPatch(
                     store,
                     baseUrl,
-                    token,
                     latest,
                     version,
                     active,
@@ -127,14 +122,13 @@ internal object BundleInstaller {
             }
         }
 
-        return installFull(store, baseUrl, token, latest, version, active, patchFailure)
+        return installFull(store, baseUrl, latest, version, active, patchFailure)
     }
 
     @Throws(Exception::class)
     private fun installPatch(
         store: BundleStore,
         baseUrl: URL,
-        token: String,
         latest: JSONObject,
         version: String,
         baseVersion: String,
@@ -163,7 +157,6 @@ internal object BundleInstaller {
 
         val patchManifestBytes = httpGetBytes(
             manifestUrl,
-            token,
             "补丁 manifest",
             MAX_MANIFEST_BYTES,
         )
@@ -239,7 +232,6 @@ internal object BundleInstaller {
             tempZip = patchZipFile
             val actualPatchSize = httpDownload(
                 zipUrl,
-                token,
                 patchZipFile,
                 MAX_BUNDLE_BYTES,
                 "补丁 zip",
@@ -374,7 +366,6 @@ internal object BundleInstaller {
     private fun installFull(
         store: BundleStore,
         baseUrl: URL,
-        token: String,
         latest: JSONObject,
         version: String,
         active: String?,
@@ -392,7 +383,6 @@ internal object BundleInstaller {
             tempZip = zipFile
             val actualZipSize = httpDownload(
                 zipUrl,
-                token,
                 zipFile,
                 MAX_BUNDLE_BYTES,
                 "bundle.zip",
@@ -631,19 +621,17 @@ internal object BundleInstaller {
     @Throws(IOException::class)
     private fun httpGetText(
         url: URL,
-        token: String,
         label: String,
         maxBytes: Long,
-    ): String = String(httpGetBytes(url, token, label, maxBytes), StandardCharsets.UTF_8)
+    ): String = String(httpGetBytes(url, label, maxBytes), StandardCharsets.UTF_8)
 
     @Throws(IOException::class)
     private fun httpGetBytes(
         url: URL,
-        token: String,
         label: String,
         maxBytes: Long,
     ): ByteArray {
-        val conn = openConnection(url, token, "application/json")
+        val conn = openConnection(url, "application/json")
         try {
             val status = conn.responseCode
             if (status != 200) {
@@ -660,12 +648,11 @@ internal object BundleInstaller {
     @Throws(IOException::class)
     private fun httpDownload(
         url: URL,
-        token: String,
         destination: File,
         maxBytes: Long,
         label: String,
     ): Long {
-        val conn = openConnection(url, token, "application/zip")
+        val conn = openConnection(url, "application/zip")
         try {
             val status = conn.responseCode
             if (status != 200) {
@@ -701,14 +688,12 @@ internal object BundleInstaller {
     @Throws(IOException::class)
     private fun openConnection(
         url: URL,
-        token: String,
         accept: String,
     ): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
         connectTimeout = CONNECT_TIMEOUT_MS
         readTimeout = READ_TIMEOUT_MS
         requestMethod = "GET"
         setRequestProperty("accept", accept)
-        setRequestProperty("x-sync-token", token)
         useCaches = false
     }
 

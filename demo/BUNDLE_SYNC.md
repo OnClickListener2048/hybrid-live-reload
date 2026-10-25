@@ -40,7 +40,7 @@ npm run bundle:headless
 | 服务 | 端口 | 作用 |
 | --- | --- | --- |
 | mock 生产站点 + API | 8080 | WebView 的 URL 始终落在这个 origin |
-| bundle 同步服务 | 9090 | 提供 `latest.json`、`bundle.zip`、`manifest.json`，以及每个旧版本对应的 `patch-from-<version>.zip/json`，需要 token |
+| bundle 同步服务 | 9090 | 提供 `latest.json`、`bundle.zip`、`manifest.json`，以及每个旧版本对应的 `patch-from-<version>.zip/json` |
 
 首次启动时如果 `dist/latest.json` 不存在，会自动从 `web/bundle` 构建 v1。
 
@@ -48,7 +48,7 @@ npm run bundle:headless
 
 ```bash
 npm run bundle:build    # 只构建，不启动服务
-npm run bundle:smoke    # 23 项包格式 / SHA-256 / 下载 / 增量补丁校验
+npm run bundle:smoke    # 22 项包格式 / SHA-256 / 下载 / 增量补丁校验
 ```
 
 ---
@@ -58,7 +58,7 @@ npm run bundle:smoke    # 23 项包格式 / SHA-256 / 下载 / 增量补丁校�
 ```
 ┌──────────────────── 电脑 ────────────────────┐        ┌────────────── 手机 ──────────────┐
 │ desktop-bundle (Electron)                     │  LAN   │ DevShell APK                      │
-│   :9090  latest.json / bundle.zip / manifest  │ ◄────► │  1. 带 token 拉 latest.json       │
+│   :9090  latest.json / bundle.zip / manifest  │ ◄────► │  1. 拉 latest.json                │
 │   :8080  mock 生产页 + /api                    │        │  2. 下载 zip，验 SHA-256          │
 │                                               │        │  3. 逐文件验 hash，原子切换版本    │
 │                                               │        │  5. WebView 打开生产 URL          │
@@ -113,7 +113,7 @@ adb install -r app-android/app/build/outputs/apk/devShell/debug/app-devShell-deb
 
 ```bash
 adb shell "am start -W -a android.intent.action.VIEW \
-  -d 'hybriddemo-dev://sync?server=http%3A%2F%2F10.0.2.2%3A9090&token=demo-sync-token&prod=http%3A%2F%2F10.0.2.2%3A8080&auto=1' \
+  -d 'hybriddemo-dev://sync?server=http%3A%2F%2F10.0.2.2%3A9090&prod=http%3A%2F%2F10.0.2.2%3A8080&auto=1' \
   -n com.example.hybriddemo.devshell/com.example.hybriddebug.DevShellActivity"
 ```
 
@@ -123,12 +123,12 @@ adb shell "am start -W -a android.intent.action.VIEW \
 
 1. 手机和电脑连同一个 Wi-Fi；
 2. 用系统相机扫桌面控制台的二维码。二维码是一个 `http://<电脑IP>:9090/pair?...` 页面，相机打开浏览器后点「打开 Hybrid DevShell」即可（部分浏览器会自动尝试跳转）；
-3. 如果相机仍不打开浏览器，或手机没有安装 DevShell，直接打开 App，手动填服务器地址 `http://<电脑IP>:9090`、token `demo-sync-token`、生产 origin `http://<电脑IP>:8080`，再点「同步最新包」。
+3. 如果相机仍不打开浏览器，或手机没有安装 DevShell，直接打开 App，手动填服务器地址 `http://<电脑IP>:9090`、生产 origin `http://<电脑IP>:8080`，再点「同步最新包」。
 
 扫码链接长这样：
 
 ```
-hybriddemo-dev://sync?server=http%3A%2F%2F192.168.1.102%3A9090&token=demo-sync-token&prod=http%3A%2F%2F192.168.1.102%3A8080&auto=1
+hybriddemo-dev://sync?server=http%3A%2F%2F192.168.1.102%3A9090&prod=http%3A%2F%2F192.168.1.102%3A8080&auto=1
 ```
 
 `auto=1` 表示收到配置后立即检查更新并加载，不用再点按钮。
@@ -186,7 +186,7 @@ hybriddemo-dev://sync?server=http%3A%2F%2F192.168.1.102%3A9090&token=demo-sync-t
 
 手机端的安装流程（[`BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt)）：
 
-1. 带 `Authorization` / token 请求 `latest.json`；
+1. 直接请求 `latest.json`（demo 不做鉴权）；
 2. 校验格式、版本号、bundle 路径，以及 URL 是否属于同步服务器；
 3. 下载 zip，校验大小和整体 SHA-256；
 4. 校验 manifest 的 version、entry、文件列表；
@@ -352,7 +352,7 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 
 ## 6. 已验证内容
 
-- `npm run bundle:smoke`：23/23 通过（token 鉴权、latest、zip 大小/SHA-256、逐文件 hash、注入的 build-info、路径穿越、错误 token、补丁文件表/体积，以及用 v1 + patch 重建 v2 全量文件树）。
+- `npm run bundle:smoke`：22/22 通过（latest、zip 大小/SHA-256、逐文件 hash、注入的 build-info、路径穿越、忽略旧 token 参数、补丁文件表/体积，以及用 v1 + patch 重建 v2 全量文件树）。
 - Android 构建：Kotlin 2.1.0，`npm run android:build:all` 成功，production / devShell 两个 APK 均产出。
 - Android 模拟器（Kotlin DevShell）：安装新 APK → 深链配对 → 从 v4 应用补丁到 React v6 → 页面显示 **REACT + VITE** / `bundle v6`，`/api/me` 返回 200，localStorage 计数 10 保留。
 - 补丁成功路径（Kotlin 客户端）：`已应用补丁 v6（3 个变化文件，删除 1 个，70.2 KiB；完整包 72.2 KiB，节省 2.0 KiB）；上一版 v4`。
@@ -361,7 +361,7 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 - native token：`/api/me` 带 `Authorization: Bearer native-demo-token` 返回 200，证明 API 没有被本地包拦截。
 - 生产包隔离：production APK 中不存在 `com.example.hybriddebug`。
 - 真机（OPPO，Android 14，与电脑同一 Wi-Fi）：安装 Kotlin DevShell APK → 深链配对 → 从 v5 应用补丁到 React v6 → 页面加载，`/api/me` 返回 200（`auth: native-token`、`tokenSource: URL query`）。
-- 扫码链路：系统相机 → `http://<电脑IP>:9090/pair?...` 配对页 →「打开 Hybrid DevShell」→ App 收到完整 server/token/prod/auto 参数并自动同步。
+- 扫码链路：系统相机 → `http://<电脑IP>:9090/pair?...` 配对页 →「打开 Hybrid DevShell」→ App 收到完整 server/prod/auto 参数并自动同步。
 
 ---
 
@@ -373,7 +373,7 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 - **没有断点调试**。按当前规划，调试先放弃。
 - **没有 iOS 包同步**。本 demo 只做 Android；iOS 仍走原代理 demo 或后续方案。
 - **自定义 scheme 二维码兼容性有限**。部分相机 App 不会直接打开 `hybriddemo-dev://`；现在二维码改用 HTTP 配对页 `/pair`，由浏览器再跳转 custom scheme，部分浏览器仍可能要求手动点按钮。相机完全不支持扫码打开网页时，仍需手填配置。
-- **同步服务只有一次性 token，没有 TLS**。仅限内网 demo；真实方案需要 HTTPS、短期 token、审计和限流。
+- **同步服务没有鉴权，也没有 TLS**。仅限内网 demo；真实方案需要 HTTPS、鉴权、审计和限流。
 - **DevShell 是 debug 包**。真实交付应由流水线构建 devShell release 包，前端开发不需要跑 Android 工程。
 - **token 目前在 URL 里**。这符合当前 SSO 的传参方式，日志里也刻意不打印完整 URL；真实 token 应是短期、一次性的。
 
@@ -384,11 +384,11 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 | 文件 | 作用 |
 | --- | --- |
 | [`core/bundle-builder.js`](core/bundle-builder.js) | 构建 manifest、zip、增量补丁和 latest.json |
-| [`core/bundle-server.js`](core/bundle-server.js) | 带 token 的 LAN 包服务器（完整包 + patch） |
+| [`core/bundle-server.js`](core/bundle-server.js) | LAN 包服务器（完整包 + patch） |
 | [`core/bundle-orchestrator.js`](core/bundle-orchestrator.js) | 启停 8080 / 9090，生成配对链接 |
 | [`desktop-bundle/main.js`](desktop-bundle/main.js) | Electron 控制台主进程 |
 | [`desktop-bundle/renderer/app.js`](desktop-bundle/renderer/app.js) | 控制台 UI：QR、状态、补丁信息、构建、日志 |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 23 项包与补丁校验测试 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 22 项包与补丁校验测试 |
 | [`web/bundle/app.js`](web/bundle/app.js) | 手机页面；改 `BUNDLE_NOTE` 体验版本更新 |
 | [`web-react/`](web-react) | 可切换的 React + Vite source，验证真实构建产物 |
 | [`web-debug-plugin/.../DevShellActivity.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellActivity.kt) | DevShell UI、配对、同步、回滚 |

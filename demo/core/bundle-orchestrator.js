@@ -12,13 +12,11 @@ const {
   DEFAULT_OUT,
 } = require('./bundle-builder');
 
-const SYNC_TOKEN = 'demo-sync-token';
 const DEMO_ROOT = path.join(__dirname, '..');
 
-function pairUrl({ server, prod, token, auto = true }) {
+function pairUrl({ server, prod, auto = true }) {
   const query = new URLSearchParams({
     server,
-    token,
     prod,
     auto: auto ? '1' : '0',
   });
@@ -27,10 +25,9 @@ function pairUrl({ server, prod, token, auto = true }) {
 
 // QR-friendly URL: system cameras understand http(s), then the page opens
 // the custom scheme. Direct deep links still use pairUrl above.
-function pairPageUrl({ server, prod, token, auto = true }) {
+function pairPageUrl({ server, prod, auto = true }) {
   const query = new URLSearchParams({
     server,
-    token,
     prod,
     auto: auto ? '1' : '0',
   });
@@ -103,7 +100,6 @@ class BundleOrchestrator extends EventEmitter {
       lanIp,
       lanIpIsLoopback: lanIp === '127.0.0.1',
       ports,
-      syncToken: SYNC_TOKEN,
       prodUrl: prodLan,
       prodEmulatorUrl: prodEmulator,
       bundleServerUrl: serverLan,
@@ -111,18 +107,15 @@ class BundleOrchestrator extends EventEmitter {
       pairLink: pairUrl({
         server: serverLan,
         prod: prodLan,
-        token: SYNC_TOKEN,
       }),
       // The QR code uses the HTTP page so the system camera can open it.
       qrLink: pairPageUrl({
         server: serverLan,
         prod: prodLan,
-        token: SYNC_TOKEN,
       }),
       pairLinkEmulator: pairUrl({
         server: serverEmulator,
         prod: prodEmulator,
-        token: SYNC_TOKEN,
       }),
       sourceDir: this.sourceDir,
       sourceLabel: this.sourceLabel(),
@@ -162,7 +155,6 @@ class BundleOrchestrator extends EventEmitter {
     const bundleServer = createBundleServer({
       port: ports.bundle,
       root: DEFAULT_OUT,
-      token: SYNC_TOKEN,
       logger: (line) => this.log(line),
     });
     this.services = { prod, bundleServer };

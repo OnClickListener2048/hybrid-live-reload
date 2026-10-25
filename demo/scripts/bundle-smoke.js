@@ -29,7 +29,6 @@ async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hybrid-bundle-smoke-'));
   const sourceDir = path.join(tmp, 'source');
   const outDir = path.join(tmp, 'out');
-  const token = 'smoke-token';
   const port = 19090 + Math.floor(Math.random() * 200);
   let bundleServer;
   try {
@@ -55,7 +54,6 @@ async function main() {
     bundleServer = createBundleServer({
       port,
       root: outDir,
-      token,
       logger: (line) => console.log(`       ${line}`),
     });
     await bundleServer.start();
@@ -63,24 +61,13 @@ async function main() {
     const base = `http://127.0.0.1:${port}`;
     console.log('\nbundle server smoke checks:');
 
-    const unauthorized = await fetch(`${base}/latest.json`);
-    check(
-      'latest.json requires token',
-      unauthorized.status === 401,
-      `HTTP ${unauthorized.status}`
-    );
-
-    const latestRes = await fetch(`${base}/latest.json`, {
-      headers: { 'x-sync-token': token },
-    });
-    check('latest.json returns 200', latestRes.status === 200, `HTTP ${latestRes.status}`);
+    const latestRes = await fetch(`${base}/latest.json`);
+    check('latest.json returns 200 without a token', latestRes.status === 200, `HTTP ${latestRes.status}`);
     const remoteLatest = await latestRes.json();
     check('latest version is v2', remoteLatest.version === 'v2', remoteLatest.version);
     check('latest hash matches local build', remoteLatest.sha256 === latest.sha256);
 
-    const zipRes = await fetch(`${base}/${remoteLatest.bundle}`, {
-      headers: { 'x-sync-token': token },
-    });
+    const zipRes = await fetch(`${base}/${remoteLatest.bundle}`);
     const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
     check('zip returns 200', zipRes.status === 200, `HTTP ${zipRes.status}`);
     check('zip size matches latest.json', zipBuffer.length === remoteLatest.size);
@@ -109,21 +96,23 @@ async function main() {
     const buildInfo = await zip.file('build-info.js').async('string');
     check('build-info.js was injected', /"version": "v2"/.test(buildInfo));
 
-    const traversal = await fetch(`${base}/bundles/%2e%2e%2flatest.json`, {
-      headers: { 'x-sync-token': token },
-    });
+    const traversal = await fetch(`${base}/bundles/%2e%2e%2flatest.json`);
     check('path traversal is not served', traversal.status === 404, `HTTP ${traversal.status}`);
 
-    const wrongToken = await fetch(`${base}/latest.json?token=nope`);
-    check('wrong query token is rejected', wrongToken.status === 401, `HTTP ${wrongToken.status}`);
+    const ignoredToken = await fetch(`${base}/latest.json?token=nope`, {
+      headers: { 'x-sync-token': 'nope' },
+    });
+    check(
+      'legacy token headers/params are ignored',
+      ignoredToken.status === 200,
+      `HTTP ${ignoredToken.status}`
+    );
 
     console.log('\nfile-level patch checks:');
     const patch = remoteLatest.patches && remoteLatest.patches.v1;
     check('latest has a patch from v1', Boolean(patch));
 
-    const patchManifestRes = await fetch(`${base}/${patch.manifest}`, {
-      headers: { 'x-sync-token': token },
-    });
+    const patchManifestRes = await fetch(`${base}/${patch.manifest}`);
     check(
       'patch manifest returns 200',
       patchManifestRes.status === 200,
@@ -132,9 +121,7 @@ async function main() {
     const patchManifestBytes = Buffer.from(await patchManifestRes.arrayBuffer());
     const patchManifest = JSON.parse(patchManifestBytes.toString('utf8'));
 
-    const patchZipRes = await fetch(`${base}/${patch.zip}`, {
-      headers: { 'x-sync-token': token },
-    });
+    const patchZipRes = await fetch(`${base}/${patch.zip}`);
     const patchZipBuffer = Buffer.from(await patchZipRes.arrayBuffer());
     check(
       'patch zip returns 200',

@@ -19,7 +19,7 @@
             </intent-filter>
 
             <!-- QR code / camera can open this directly, so the developer does
-                 not have to type a server address and token. -->
+                 not have to type a server address. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

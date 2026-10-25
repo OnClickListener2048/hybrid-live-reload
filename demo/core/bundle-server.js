@@ -1,21 +1,9 @@
 'use strict';
 
-const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { send, sendJson } = require('./util');
-
-function safeEqual(a, b) {
-  const left = Buffer.from(String(a));
-  const right = Buffer.from(String(b));
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-}
-
-function authToken(req, url) {
-  return url.searchParams.get('token') || req.headers['x-sync-token'] || '';
-}
 
 // Many Android system cameras only open http(s) links, not custom schemes.
 // The QR code therefore points here; this page forwards to the deep link
@@ -47,13 +35,13 @@ const PAIR_PAGE = `<!doctype html>
   <h1>Hybrid DevShell</h1>
   <p id="hint">正在尝试打开 App…</p>
   <a id="open" href="#">打开 Hybrid DevShell</a>
-  <p class="tip">如果浏览器没有跳转，请点上面的按钮。仍然没有反应时，确认手机已安装 DevShell，或回到 App 手动填写服务器地址和 token。</p>
+  <p class="tip">如果浏览器没有跳转，请点上面的按钮。仍然没有反应时，确认手机已安装 DevShell，或回到 App 手动填写服务器地址。</p>
 </main>
 <script>
 (function () {
   var params = new URLSearchParams(location.search);
   var wanted = new URLSearchParams();
-  ['server', 'token', 'prod', 'auto'].forEach(function (key) {
+  ['server', 'prod', 'auto'].forEach(function (key) {
     var value = params.get(key);
     if (value) wanted.set(key, value);
   });
@@ -69,14 +57,10 @@ const PAIR_PAGE = `<!doctype html>
 function createBundleServer({
   port,
   root,
-  token,
   logger = () => {},
 }) {
-  if (!token) throw new Error('bundle server requires a sync token');
-
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    // Never log the query string: it can contain the pairing token.
     logger(`[bundle] ${req.method} ${url.pathname}`);
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -97,10 +81,6 @@ function createBundleServer({
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store',
       });
-    }
-
-    if (!safeEqual(authToken(req, url), token)) {
-      return sendJson(res, 401, { ok: false, error: 'invalid_sync_token' });
     }
 
     if (url.pathname === '/latest.json') {
@@ -163,7 +143,6 @@ function createBundleServer({
   return {
     server,
     port,
-    token,
     root,
     start: () =>
       new Promise((resolve, reject) => {
