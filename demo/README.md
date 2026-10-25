@@ -189,7 +189,7 @@ Android 的明文策略（`usesCleartextTraffic` / `network_security_config.xml`
 cd demo
 npm run bundle:demo       # Electron 控制台
 npm run bundle:headless   # 无界面，只打印配对信息
-npm run bundle:smoke      # 34 项自定义 TCP / bundle / patch 检查
+npm run bundle:smoke      # 33 项自定义 TCP / bundle / patch 检查
 ```
 
 | 端口 | 协议 | 作用 |
@@ -213,7 +213,7 @@ http://<电脑IP>:9090/pair?server=tcp%3A%2F%2F<电脑IP>%3A9090&prod=http%3A%2F
 
 ```bash
 curl http://127.0.0.1:9090/health
-# {"ok":true,"service":"bundle-server","transport":"custom-tcp","protocol":1,...}
+# {"ok":true,"service":"bundle-server","transport":"custom-tcp","protocol":2,...}
 ```
 
 ### 5.3 同一端口复用
@@ -239,22 +239,20 @@ curl http://127.0.0.1:9090/health
 ```text
 偏移  长度  字段
 0     4     magic = "HBT1"
-4     1     version = 1
+4     1     version = 2
 5     1     opcode = 1（GET）
-6     2     tokenLen，大端；新客户端固定 0
-8     4     pathLen，大端
-12    ...   legacy token（长度为 tokenLen；新客户端为空）
-12+tokenLen ... path（UTF-8，长度为 pathLen）
+6     4     pathLen，大端
+10    ...   path（UTF-8，长度为 pathLen）
 ```
 
-请求头固定 12 字节。`tokenLen` 字段是为了兼容旧版客户端保留的：服务端会读取但**完全忽略** token 内容，新客户端发送 `tokenLen = 0`。不要把它当成鉴权字段。
+请求头固定 10 字节，**没有 token 字段，也没有任何鉴权字段**。协议版本 2 删掉了版本 1 里的 `tokenLen` + token；这里不再兼容旧客户端。
 
 请求约束：
 
 - `path` 必须非空、以 `/` 开头、不能包含 NUL；
-- `path` 最大 4096 字节；旧 token 字段最大 4096 字节；整帧最大 12 + 4096 + 4096 字节；
+- `path` 最大 4096 字节；整帧最大 10 + 4096 字节；
 - 帧解析完成后如果还有多余字节，按 `trailing_bytes` 拒绝；
-- 只支持版本 1 和 opcode 1，其他值返回 `BAD_REQUEST`。
+- 只支持版本 2 和 opcode 1，其他值返回 `BAD_REQUEST`。
 
 允许的 path 只有：
 
@@ -273,7 +271,7 @@ curl http://127.0.0.1:9090/health
 ```text
 偏移  长度  字段
 0     4     magic = "HBR1"
-4     1     version = 1
+4     1     version = 2
 5     1     status
 6     2     reserved = 0
 8     8     bodyLen，大端 u64
@@ -289,16 +287,15 @@ curl http://127.0.0.1:9090/health
 | --- | --- | --- |
 | 0 | OK | 成功，body 是文件内容 |
 | 1 | BAD_REQUEST | magic / 版本 / opcode / 帧格式 / path 不合法 |
-| 2 | UNAUTHORIZED | 协议保留，当前无鉴权，不会返回 |
-| 3 | NOT_FOUND | 路径不在白名单，或文件不存在 |
-| 4 | TOO_LARGE | 响应文件超过 128 MiB |
-| 5 | SERVER_ERROR | 服务端读取文件失败等内部错误 |
+| 2 | NOT_FOUND | 路径不在白名单，或文件不存在 |
+| 3 | TOO_LARGE | 响应文件超过 128 MiB |
+| 4 | SERVER_ERROR | 服务端读取文件失败等内部错误 |
 
 服务端 socket 空闲超时 30 秒；Android 客户端连接超时 8 秒、读超时 30 秒；Node 测试客户端的请求超时是 10 秒。单次响应上限 128 MiB。服务端会把整个文件读入内存后再编码发送，没有流式分块或断点续传，`bundle.zip` 很大时内存占用会同步上升。
 
 ### 5.5 同步流程
 
-1. 深链或手填地址得到 `tcp://host:port`，不再需要 token；
+1. 深链或手填地址得到 `tcp://host:port`，地址和请求帧里都不含 token；
 2. 通过原生 `Socket` 请求 `/latest.json`，校验帧 checksum、格式和版本号；
 3. 如果当前 active 版本在 `patches` 里有匹配项，先下载 `patch-from-<base>.json` 和 patch zip；
 4. 没有补丁、补丁校验失败或安装失败时，自动回退下载完整 `bundle.zip`；
@@ -337,14 +334,14 @@ load /sso local=true version=v3
 | [`core/bundle-tcp-client.js`](core/bundle-tcp-client.js) | Node 侧 TCP 客户端，供 smoke test 使用 |
 | [`core/bundle-server.js`](core/bundle-server.js) | 单端口复用、HTTP `/pair` `/health`、TCP 文件服务、延迟 FIN |
 | [`core/bundle-builder.js`](core/bundle-builder.js) | manifest、zip、增量补丁和 `latest.json` |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 34 项协议 / bundle / patch 校验 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 33 项协议 / bundle / patch 校验 |
 | [`app-android/.../BundleTcpClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleTcpClient.kt) | Android 原生 Socket 客户端、帧解析、checksum 校验 |
 | [`app-android/.../BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt) | 补丁选择、下载、校验、原子安装与回退 |
 | [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md) | 包格式、补丁算法、二维码和完整验收记录 |
 
 ### 5.8 已验证
 
-- `npm run bundle:smoke`：34/34 通过，覆盖协议帧、checksum、路径穿越、错误版本 / opcode / 尾随字节、完整包和 v1 + patch 重建；
+- `npm run bundle:smoke`：33/33 通过，覆盖协议帧、checksum、路径穿越、错误版本 / opcode / 尾随字节、完整包和 v1 + patch 重建；
 - Pixel_9 模拟器：深链无 token 配对，完整包和 `v3 → v4` 补丁均通过自定义 TCP 下载；
 - cleartext 关闭：WebView 报 `ERR_CLEARTEXT_NOT_PERMITTED`，TCP 同步和应用本地包不受影响；
 - 模拟器 NAT 延迟 FIN 修复后，连续 30 次同步无截断。

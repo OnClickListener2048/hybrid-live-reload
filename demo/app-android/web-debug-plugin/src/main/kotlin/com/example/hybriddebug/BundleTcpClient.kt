@@ -28,17 +28,17 @@ import java.util.Locale
  *
  * Wire format matches core/bundle-protocol.js:
  *
- * request:  "HBT1" | version | opcode | tokenLen(=0) | pathLen | path
+ * request:  "HBT1" | version | opcode | pathLen | path
  * response: "HBR1" | version | status | reserved | bodyLen | sha256(body) | body
  *
- * The request keeps the legacy tokenLen field for wire compatibility, but this
- * is a development-only transport with no authentication, so it is always 0.
+ * This is a development-only transport with no authentication, so the request
+ * has no token field.
  */
 internal object BundleTcpClient {
 
-    private const val PROTOCOL_VERSION = 1
+    private const val PROTOCOL_VERSION = 2
     private const val OP_GET = 1
-    private const val REQUEST_HEADER_SIZE = 12
+    private const val REQUEST_HEADER_SIZE = 10
     private const val RESPONSE_HEADER_SIZE = 48
     private const val MAX_PATH_BYTES = 4096
     private const val MAX_ERROR_BYTES = 64L * 1024
@@ -51,10 +51,9 @@ internal object BundleTcpClient {
 
     private const val STATUS_OK = 0
     private const val STATUS_BAD_REQUEST = 1
-    private const val STATUS_UNAUTHORIZED = 2
-    private const val STATUS_NOT_FOUND = 3
-    private const val STATUS_TOO_LARGE = 4
-    private const val STATUS_SERVER_ERROR = 5
+    private const val STATUS_NOT_FOUND = 2
+    private const val STATUS_TOO_LARGE = 3
+    private const val STATUS_SERVER_ERROR = 4
 
     data class Endpoint(val host: String, val port: Int) {
         override fun toString(): String = "tcp://$host:$port"
@@ -199,8 +198,6 @@ internal object BundleTcpClient {
         header.put(REQUEST_MAGIC)
         header.put(PROTOCOL_VERSION.toByte())
         header.put(OP_GET.toByte())
-        // Legacy token field: kept on the wire, always empty.
-        header.putShort(0)
         header.putInt(pathBytes.size)
 
         output.write(header.array())
@@ -288,7 +285,6 @@ internal object BundleTcpClient {
 
     private fun statusName(status: Int): String = when (status) {
         STATUS_BAD_REQUEST -> "请求错误"
-        STATUS_UNAUTHORIZED -> "token 无效"
         STATUS_NOT_FOUND -> "文件不存在"
         STATUS_TOO_LARGE -> "响应过大"
         STATUS_SERVER_ERROR -> "服务器错误"

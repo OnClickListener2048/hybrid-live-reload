@@ -102,23 +102,6 @@ async function main() {
       `HTTP ${httpLatest.status}`
     );
 
-    console.log('\ncustom TCP token-free checks:');
-    const legacyTokenRes = protocol.parseResponse(
-      await exchange({
-        host,
-        port,
-        request: protocol.encodeRequest({
-          token: 'legacy-client-token',
-          path: '/latest.json',
-        }),
-      })
-    );
-    check(
-      'legacy token bytes are ignored, not required',
-      legacyTokenRes.status === protocol.STATUS.OK,
-      protocol.statusName(legacyTokenRes.status)
-    );
-
     console.log('\ncustom TCP bundle checks:');
     const latestRes = await request({
       host,
@@ -239,8 +222,7 @@ async function main() {
     protocol.REQUEST_MAGIC.copy(oversizedHeader, 0);
     oversizedHeader.writeUInt8(protocol.VERSION, 4);
     oversizedHeader.writeUInt8(protocol.OP_GET, 5);
-    oversizedHeader.writeUInt16BE(0, 6);
-    oversizedHeader.writeUInt32BE(protocol.MAX_PATH_BYTES + 1, 8);
+    oversizedHeader.writeUInt32BE(protocol.MAX_PATH_BYTES + 1, 6);
     const oversizedRes = protocol.parseResponse(
       await exchange({ host, port, request: oversizedHeader })
     );

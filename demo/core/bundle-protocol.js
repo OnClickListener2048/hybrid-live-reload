@@ -5,12 +5,10 @@ const crypto = require('crypto');
 // Custom binary protocol used by the bundle sync transport.
 //
 // Request (one per TCP connection):
-//   magic "HBT1" | version u8 | opcode u8 | tokenLen u16 | pathLen u32 |
-//   token (UTF-8) | path (UTF-8)
+//   magic "HBT1" | version u8 | opcode u8 | pathLen u32 | path (UTF-8)
 //
-// The token field is kept only for wire compatibility with older clients and
-// is ignored by the server; this is a development-only transport with no
-// authentication. New clients send tokenLen = 0.
+// This is a development-only transport with no authentication, so the request
+// has no token field.
 //
 // Response:
 //   magic "HBR1" | version u8 | status u8 | reserved u16 | bodyLen u64 |
@@ -19,38 +17,34 @@ const crypto = require('crypto');
 // The response checksum lets the client reject a truncated or corrupted
 // latest.json/manifest before it is parsed. Zip/patch files are also checked
 // against the hashes already declared in latest.json/manifest.json.
+//
+// Version 2 removed the legacy tokenLen field from version 1; old clients are
+// intentionally not supported.
 
 const REQUEST_MAGIC = Buffer.from('HBT1');
 const RESPONSE_MAGIC = Buffer.from('HBR1');
-const VERSION = 1;
+const VERSION = 2;
 const OP_GET = 1;
 
 const STATUS = Object.freeze({
   OK: 0,
   BAD_REQUEST: 1,
-  UNAUTHORIZED: 2,
-  NOT_FOUND: 3,
-  TOO_LARGE: 4,
-  SERVER_ERROR: 5,
+  NOT_FOUND: 2,
+  TOO_LARGE: 3,
+  SERVER_ERROR: 4,
 });
 
-const REQUEST_HEADER_SIZE = 12;
+const REQUEST_HEADER_SIZE = 10;
 const RESPONSE_HEADER_SIZE = 48;
-// Legacy request field: accepted for old clients, never checked by the server.
-const MAX_TOKEN_BYTES = 4096;
 const MAX_PATH_BYTES = 4096;
-const MAX_REQUEST_BYTES = REQUEST_HEADER_SIZE + MAX_TOKEN_BYTES + MAX_PATH_BYTES;
+const MAX_REQUEST_BYTES = REQUEST_HEADER_SIZE + MAX_PATH_BYTES;
 
 function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest();
 }
 
-function encodeRequest({ token = '', path, opcode = OP_GET } = {}) {
-  const tokenBytes = Buffer.from(String(token), 'utf8');
+function encodeRequest({ path, opcode = OP_GET } = {}) {
   const pathBytes = Buffer.from(String(path || ''), 'utf8');
-  if (tokenBytes.length > MAX_TOKEN_BYTES) {
-    throw new Error('sync token is too large');
-  }
   if (pathBytes.length > MAX_PATH_BYTES) {
     throw new Error('request path is too large');
   }
@@ -59,13 +53,12 @@ function encodeRequest({ token = '', path, opcode = OP_GET } = {}) {
   REQUEST_MAGIC.copy(header, 0);
   header.writeUInt8(VERSION, 4);
   header.writeUInt8(opcode, 5);
-  header.writeUInt16BE(tokenBytes.length, 6);
-  header.writeUInt32BE(pathBytes.length, 8);
-  return Buffer.concat([header, tokenBytes, pathBytes]);
+  header.writeUInt32BE(pathBytes.length, 6);
+  return Buffer.concat([header, pathBytes]);
 }
 
 // Returns null while the header/body is incomplete. Returns { error } for a
-// complete but invalid frame, otherwise { opcode, token, path, total }.
+// complete but invalid frame, otherwise { opcode, path, total }.
 function parseRequest(buffer) {
   if (buffer.length < REQUEST_HEADER_SIZE) return null;
   if (!buffer.subarray(0, 4).equals(REQUEST_MAGIC)) {
@@ -75,24 +68,18 @@ function parseRequest(buffer) {
     return { error: 'unsupported_version' };
   }
   const opcode = buffer.readUInt8(5);
-  const tokenLength = buffer.readUInt16BE(6);
-  const pathLength = buffer.readUInt32BE(8);
-  if (tokenLength > MAX_TOKEN_BYTES || pathLength > MAX_PATH_BYTES) {
+  const pathLength = buffer.readUInt32BE(6);
+  if (pathLength > MAX_PATH_BYTES) {
     return { error: 'request_too_large' };
   }
 
-  const total = REQUEST_HEADER_SIZE + tokenLength + pathLength;
+  const total = REQUEST_HEADER_SIZE + pathLength;
   if (buffer.length < total) return null;
   if (buffer.length > total) return { error: 'trailing_bytes' };
 
   return {
     opcode,
-    token: buffer
-      .subarray(REQUEST_HEADER_SIZE, REQUEST_HEADER_SIZE + tokenLength)
-      .toString('utf8'),
-    path: buffer
-      .subarray(REQUEST_HEADER_SIZE + tokenLength, total)
-      .toString('utf8'),
+    path: buffer.subarray(REQUEST_HEADER_SIZE, total).toString('utf8'),
     total,
   };
 }
@@ -145,8 +132,6 @@ function statusName(status) {
       return 'ok';
     case STATUS.BAD_REQUEST:
       return 'bad_request';
-    case STATUS.UNAUTHORIZED:
-      return 'unauthorized';
     case STATUS.NOT_FOUND:
       return 'not_found';
     case STATUS.TOO_LARGE:
@@ -166,7 +151,6 @@ module.exports = {
   STATUS,
   REQUEST_HEADER_SIZE,
   RESPONSE_HEADER_SIZE,
-  MAX_TOKEN_BYTES,
   MAX_PATH_BYTES,
   MAX_REQUEST_BYTES,
   sha256,

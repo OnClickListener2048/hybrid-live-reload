@@ -48,7 +48,7 @@ npm run bundle:headless
 
 ```bash
 npm run bundle:build    # 只构建，不启动服务
-npm run bundle:smoke    # 34 项：HTTP 配对页 + 自定义 TCP 协议 / SHA-256 / 增量补丁
+npm run bundle:smoke    # 33 项：HTTP 配对页 + 自定义 TCP 协议 / SHA-256 / 增量补丁
 ```
 
 ---
@@ -354,9 +354,9 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 
 ## 6. 已验证内容
 
-- `npm run bundle:smoke`：**34/34 通过**。覆盖：
+- `npm run bundle:smoke`：**33/33 通过**。覆盖：
   - HTTP：`/health` 报告 `transport: custom-tcp`，`/pair` 生成配对页，bundle 数据经 HTTP 访问返回 404；
-  - 自定义 TCP 无鉴权：不带 token 的请求直接可用，旧客户端携带的 token 字节被忽略；
+  - 自定义 TCP 无鉴权：协议 v2 的请求帧没有 token 字段，旧协议客户端不再兼容；
   - 自定义 TCP 传输：`latest.json`、完整包 zip 的大小 / SHA-256、逐文件 hash、注入的 build-info；
   - 协议健壮性：路径穿越（编码与 `..` 两种）、未知路径、不支持的版本 / opcode、请求尾随字节、超长请求帧、响应帧 checksum 损坏；
   - 增量补丁：patch manifest / zip 的大小与 SHA-256、changed / removed 文件表，以及 `v1 + patch` 重建完整 v2 文件树。
@@ -404,7 +404,7 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 | [`core/bundle-orchestrator.js`](core/bundle-orchestrator.js) | 启停 8080 / 9090，生成 TCP 配对链接与 HTTP 配对页链接 |
 | [`desktop-bundle/main.js`](desktop-bundle/main.js) | Electron 控制台主进程 |
 | [`desktop-bundle/renderer/app.js`](desktop-bundle/renderer/app.js) | 控制台 UI：QR、状态、补丁信息、构建、日志 |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 34 项 HTTP / 自定义 TCP 协议、完整包与补丁校验测试 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 33 项 HTTP / 自定义 TCP 协议、完整包与补丁校验测试 |
 | [`web/bundle/app.js`](web/bundle/app.js) | 手机页面；改 `BUNDLE_NOTE` 体验版本更新 |
 | [`web-react/`](web-react) | 可切换的 React + Vite source，验证真实构建产物 |
 | [`web-debug-plugin/.../DevShellActivity.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellActivity.kt) | DevShell UI、配对、同步、回滚 |
