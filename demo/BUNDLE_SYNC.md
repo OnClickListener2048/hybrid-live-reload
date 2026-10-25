@@ -1,6 +1,6 @@
 # 包同步 Demo（Android）
 
-这个 demo 演示包同步方案：**不重打 Native 包，把 Web 构建产物同步到手机，DevShell 用生产 origin 加载手机本地文件；有旧版本时只下载变化文件。**
+这个 demo 演示包同步方案：**不重打 Native 包，把 Web 构建产物同步到手机，DevShell 用生产 origin 加载手机本地文件；有旧版本时只下载变化文件。** 每次同步在一条自定义 TCP 持久会话内完成，支持并发请求、客户端上传、服务端事件推送和心跳；DevShell 还可以保持一条长期实时通道，构建新版本后自动同步。
 
 它和仓库里原来的代理版 demo 是两条独立链路：
 
@@ -40,7 +40,7 @@ npm run bundle:headless
 | 服务 | 端口 | 作用 |
 | --- | --- | --- |
 | mock 生产站点 + API | 8080 | WebView 的 URL 始终落在这个 origin |
-| bundle 同步服务 | 9090 | 同一个端口：App 用**自定义 TCP** 拉 `latest.json`、`bundle.zip`、`manifest.json` 和增量补丁；HTTP 只提供 `/pair` 配对页与 `/health` |
+| bundle 同步服务 | 9090 | 同一个端口：App 用**自定义 TCP** 拉 `latest.json`、`bundle.zip`、`manifest.json` 和增量补丁，也可上传文件、收发消息、订阅推送；HTTP 只提供 `/pair` 配对页与 `/health` |
 
 首次启动时如果 `dist/latest.json` 不存在，会自动从 `web/bundle` 构建 v1。
 
@@ -48,7 +48,7 @@ npm run bundle:headless
 
 ```bash
 npm run bundle:build    # 只构建，不启动服务
-npm run bundle:smoke    # 33 项：HTTP 配对页 + 自定义 TCP 协议 / SHA-256 / 增量补丁
+npm run bundle:smoke    # 56 项：HTTP 配对页 + 自定义 TCP 双向协议 / SHA-256 / 增量补丁 / 事件推送
 ```
 
 ---
@@ -58,11 +58,12 @@ npm run bundle:smoke    # 33 项：HTTP 配对页 + 自定义 TCP 协议 / SHA-2
 ```
 ┌──────────────────── 电脑 ────────────────────┐        ┌────────────── 手机 ──────────────┐
 │ desktop-bundle (Electron)                     │  LAN   │ DevShell APK                      │
-│   :9090  自定义 TCP: latest / zip / patch      │ ◄────► │  1. 原生 Socket 拉 latest.json    │
-│          HTTP: /pair 配对页, /health           │        │  2. 下载 zip，验 SHA-256          │
-│   :8080  mock 生产页 + /api                    │        │  3. 逐文件验 hash，原子切换版本    │
-│                                               │        │  5. WebView 打开生产 URL          │
-│                                               │        │     /sso?token=...                │
+│   :9090  自定义 TCP v3 持久会话                 │ ◄────► │  1. 原生 Socket 连 TCP，HELLO     │
+│          GET latest / zip / patch             │        │  2. 并发 GET，验 SHA-256          │
+│          PUT /uploads, MESSAGE, SUBSCRIBE     │        │  3. 逐文件验 hash，原子切换版本    │
+│          EVENT 推送, PING/PONG                │        │  4. 订阅 bundle-changed 自动同步   │
+│          HTTP: /pair 配对页, /health           │        │  5. WebView 打开生产 URL          │
+│   :8080  mock 生产页 + /api                    │        │     /sso?token=...                │
 │                                               │        │  6. 静态资源 → 本地包              │
 │                                               │        │     /api 等 → 网络                │
 └───────────────────────────────────────────────┘        └───────────────────────────────────┘
@@ -75,6 +76,7 @@ npm run bundle:smoke    # 33 项：HTTP 配对页 + 自定义 TCP 协议 / SHA-2
 - **接口永远走网络**。`/api`、`/oauth`、`/login`、`/auth` 明确跳过本地包；`/sso` 本身是页面，可以由本地包提供。
 - **native token 注入**。Demo 按真实链路模拟：Native 先拿到 token，再把 `?token=native-demo-token` 拼到 SSO 页面 URL 上打开 WebView。页面里的 `/api/me` 用这个 token 发 `Authorization: Bearer`。
 - **不需要代理**。手机通过电脑 9090 的自定义 TCP 通道下载包，WebView 的页面和接口直接访问 8080（模拟器是 `10.0.2.2`，真机是电脑局域网 IP）。
+- **持久双向 TCP**。连接先 `HELLO` / `WELCOME` 握手，之后同一条会话可并发 `GET`、`PUT` 上传、`MESSAGE` 收发、`SUBSCRIBE` 订阅；服务端可推送 `EVENT` 并靠 `PING` / `PONG` 保活。同步会话完成后 `CLOSE`，实时通道则长期保持。协议细节见 [`README.md` 第 5.4 节](README.md#54-线协议)。
 
 Android 端的路由器在
 [`LocalBundleWebViewClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/LocalBundleWebViewClient.kt)：
@@ -145,9 +147,12 @@ hybriddemo-dev://sync?server=tcp%3A%2F%2F192.168.1.102%3A9090&prod=http%3A%2F%2F
 4. 点「+1」记下 localStorage 计数；
 5. 修改 [`web/bundle/app.js`](web/bundle/app.js) 里的 `BUNDLE_NOTE`；
 6. 桌面控制台点「构建新版本」；
-7. 手机 DevShell 点「同步最新包」→ 有匹配旧版本时状态显示 `已应用补丁 v2（2 个变化文件，1.7 KiB；完整包 5.0 KiB，节省 3.3 KiB）；上一版 v1`，页面文案变成新的，**localStorage 计数没有丢**；这条链路的 `latest.json`、patch manifest 和 patch zip 都由原生 Socket 走自定义 TCP；
+7. 手机 DevShell 点「同步最新包」→ 有匹配旧版本时状态显示 `已应用补丁 v2（2 个变化文件，1.7 KiB；完整包 5.0 KiB，节省 3.3 KiB）；上一版 v1`，页面文案变成新的，**localStorage 计数没有丢**；这条链路的 `latest.json`、patch manifest 和 patch zip 都在同一条持久 TCP 会话里由原生 Socket 下载，服务端日志同时出现 `HELLO … protocol=3` 和后续 `GET`；
 8. 点「回滚上一版」→ 页面回到 v1，状态显示 `已回滚到 v1`；
-9. 如果没有匹配的旧版本（例如刚「清除」过），或补丁下载/校验失败，会显示 `已应用 v2（完整包…）`，并在失败时附带 `增量补丁失败，已回退完整包：…`。
+9. 如果没有匹配的旧版本（例如刚「清除」过），或补丁下载/校验失败，会显示 `已应用 v2（完整包…）`，并在失败时附带 `增量补丁失败，已回退完整包：…`；
+10. 点「实时通道：关」→ 建立长期会话并订阅 `bundle-changed` / `upload`，状态显示 `实时通道已连接（protocol 3，订阅 2 个事件，心跳 15000ms）`，按钮变成「实时通道：开」；
+11. 点「上传 / 消息测试」→ 复用实时会话完成 `PUT /uploads/android/probe-<时间戳>.txt`、`GET` 回读和 `MESSAGE` 回显，状态显示 `双向通道测试成功…`；
+12. 保持实时通道开启，在桌面控制台再点「构建新版本」→ 服务端推送 `bundle-changed`，手机自动重新同步并显示新的补丁 / 完整包结果，不需要再点「同步最新包」。
 
 | 回滚到 v1 | token 调生产 API |
 | --- | --- |
@@ -188,14 +193,15 @@ hybriddemo-dev://sync?server=tcp%3A%2F%2F192.168.1.102%3A9090&prod=http%3A%2F%2F
 
 手机端的安装流程（[`BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt)）：
 
-1. 用原生 `Socket` 建立自定义 TCP 连接，请求帧里带路径拉取 `latest.json`；
-2. 校验格式、版本号、bundle 路径，以及路径是否限制在同步服务器的合法资源内；
-3. 下载 zip，校验大小和整体 SHA-256；
-4. 校验 manifest 的 version、entry、文件列表；
-5. 解压时拒绝路径穿越、重复条目、未知文件和超限大小；
-6. 逐文件校验 size 和 SHA-256；
-7. 解压到临时目录，完成后原子 rename 成 `versions/<version>`；
-8. 原子切换 `active` / `previous` 指针。
+1. 用原生 `Socket` 建立 TCP 连接，发送 `HELLO {protocol: 3}` 并等待 `WELCOME`；这次同步的所有请求复用这一条会话；
+2. 用带 `requestId` 的 `GET` 拉取 `latest.json`，校验 `RESPONSE` 状态、payload checksum、格式和版本号；
+3. 有匹配补丁时 `GET` patch manifest 和 patch zip，否则 `GET` 完整 `bundle.zip`；
+4. 下载 zip，校验大小和整体 SHA-256；Android 端把响应 body 流式写入文件并同时计算 hash；
+5. 校验 manifest 的 version、entry、文件列表，以及路径是否限制在同步服务器的合法资源内；
+6. 解压时拒绝路径穿越、重复条目、未知文件和超限大小；
+7. 逐文件校验 size 和 SHA-256；
+8. 解压到临时目录，完成后原子 rename 成 `versions/<version>`；
+9. 原子切换 `active` / `previous` 指针，最后发送 `CLOSE` 关闭会话。
 
 文件布局：
 
@@ -354,28 +360,25 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 
 ## 6. 已验证内容
 
-- `npm run bundle:smoke`：**33/33 通过**。覆盖：
-  - HTTP：`/health` 报告 `transport: custom-tcp`，`/pair` 生成配对页，bundle 数据经 HTTP 访问返回 404；
-  - 自定义 TCP 无鉴权：协议 v2 的请求帧没有 token 字段，旧协议客户端不再兼容；
-  - 自定义 TCP 传输：`latest.json`、完整包 zip 的大小 / SHA-256、逐文件 hash、注入的 build-info；
-  - 协议健壮性：路径穿越（编码与 `..` 两种）、未知路径、不支持的版本 / opcode、请求尾随字节、超长请求帧、响应帧 checksum 损坏；
-  - 增量补丁：patch manifest / zip 的大小与 SHA-256、changed / removed 文件表，以及 `v1 + patch` 重建完整 v2 文件树。
-- Android 模拟器（Pixel_9）实测自定义 TCP：
-  - 深链配对 `server=tcp://10.0.2.2:9090` 后自动同步；
-  - `latest.json` → `patch-from-v1.json` → `patch-from-v1.zip` 全部走原生 Socket，日志显示 `已应用补丁 v2（2 个变化文件，1.7 KiB；完整包 5.0 KiB，节省 3.3 KiB）；上一版 v1`；
-  - 清除本地包后重新同步，完整包 `bundle.zip` 同样走自定义 TCP，日志显示 `已应用 v2（完整包，4 个文件，5.0 KiB）`；
-  - 服务端只记录 `[bundle-tcp] GET …`，HTTP `/latest.json` 不再可访问；
-  - 页面 origin 仍为 `http://10.0.2.2:8080`，localStorage 计数保留。
-- **关闭 cleartext 实测**：把 app 模块的 `android:usesCleartextTraffic` 改为 `false` 后重新构建安装，深链触发的同步仍成功走自定义 TCP，日志显示 `已应用 v3（完整包，4 个文件，5.0 KiB）`；同一个 APK 的 WebView 打开生产页时报 `net::ERR_CLEARTEXT_NOT_PERMITTED`。这证明 HTTP 栈和 WebView 受系统明文策略拦截，而原生 `Socket` 的 TCP 交互不受影响。观察完把 `usesCleartextTraffic` 改回 `true` 即可恢复生产页加载。
-- Android 构建：Kotlin 2.1.0，`npm run android:build:all` 成功，production / devShell 两个 APK 均产出。
-- Android 模拟器（Kotlin DevShell）：安装新 APK → 深链配对 → 从 v4 应用补丁到 React v6 → 页面显示 **REACT + VITE** / `bundle v6`，`/api/me` 返回 200，localStorage 计数 10 保留。
-- 补丁成功路径（Kotlin 客户端）：`已应用补丁 v6（3 个变化文件，删除 1 个，70.2 KiB；完整包 72.2 KiB，节省 2.0 KiB）；上一版 v4`。
-- 扫码 / 深链 `auto=1`：收到配置后自动检查更新（日志 `正在检查更新… → 已应用补丁… → load /sso local=true version=v6`）。
-- same-origin：页面 `location.origin` 始终是 `http://10.0.2.2:8080`，localStorage 计数跨版本保留。
-- native token：`/api/me` 带 `Authorization: Bearer native-demo-token` 返回 200，证明 API 没有被本地包拦截。
-- 生产包隔离：production APK 中不存在 `com.example.hybriddebug`。
-- 真机（OPPO，Android 14，与电脑同一 Wi-Fi）：安装 Kotlin DevShell APK → 深链配对 → 从 v5 应用补丁到 React v6 → 页面加载，`/api/me` 返回 200（`auth: native-token`、`tokenSource: URL query`）。
-- 扫码链路：系统相机 → `http://<电脑IP>:9090/pair?...` 配对页 →「打开 Hybrid DevShell」→ App 收到完整 server/prod/auto 参数并自动同步。
+- `npm run bundle:smoke`：**56/56 通过**。覆盖：
+  - HTTP：`/health` 报告 `transport: custom-tcp`、`protocol: 3` 和 duplex 能力列表，`/pair` 生成配对页，bundle 数据经 HTTP 访问返回 404；
+  - 协议 v3 帧与握手：`HELLO` / `WELCOME`，requestId 关联，畸形版本 / 类型 / flags / 超限 payload，半包缓存，响应 checksum 损坏，`CLOSE` 收尾；
+  - 并发：同一条会话上 8 个 `GET` 同时在途并按 requestId 归位，混合 GET / PUT / MESSAGE 并发；
+  - 双向能力：`PUT` 上传后 `GET` 回读，非法上传路径被拒，`MESSAGE` 原样回显，`PING` / `PONG`；
+  - 事件推送：订阅后收到 `upload` 事件；构建新版本后收到 `bundle-changed`；
+  - 传输与补丁：`latest.json`、完整包 zip、逐文件 hash、注入的 build-info，patch manifest / zip 的大小与 SHA-256、changed / removed 文件表，以及 `v1 + patch` 重建完整 v2 文件树。
+- Android 模拟器（Pixel_9，协议 v3）实测：
+  - 服务端收到 `HELLO client=hybrid-android protocol=3`，完整包 v4 在同一条持久会话中下载并应用（`已应用 v4（完整包，4 个文件，5.1 KiB）`）；
+  - 实时通道：`SUBSCRIBE bundle-changed,upload`，界面显示 `实时通道已连接（protocol 3，订阅 2 个事件，心跳 15000ms）`；
+  - 双向测试：`PUT /uploads/android/probe-1792945374776.txt`（28 B）+ `GET` 回读 + `MESSAGE` 回显，内容一致；
+  - 服务端推送：构建 v5 后日志出现 `bundle changed: v5 3113adac64ff…`，手机自动新建会话同步 `v4 → v5` 补丁，显示 `已应用补丁 v5（1 个变化文件，209 B；完整包 5.1 KiB，节省 4.9 KiB）；上一版 v4`。
+- 更早的 bundle 功能验收（协议 v2 时期，包格式 / 安装 / 拦截逻辑此后未变）：
+  - Android 模拟器从 v4 应用补丁到 React v6，页面显示 **REACT + VITE** / `bundle v6`，`/api/me` 返回 200，localStorage 计数 10 保留；
+  - 扫码 / 深链 `auto=1` 自动同步，same-origin 和 native token 行为正常；
+  - production APK 中不存在 `com.example.hybriddebug`；
+  - 真机（OPPO，Android 14，同一 Wi-Fi）深链配对、补丁同步和 `/api/me` 均正常；
+  - **关闭 cleartext**：`android:usesCleartextTraffic="false"` 时同步仍成功（`已应用 v3（完整包，4 个文件，5.0 KiB）`），WebView 生产页报 `net::ERR_CLEARTEXT_NOT_PERMITTED`；观察后已改回 `true`。协议 v3 走同一条原生 `Socket` 路径，但未在该配置下重跑。
+- Android 构建：Kotlin 2.1.0，`npm run android:build:all` 成功，production / devShell 两个 APK 均产出；v3 客户端重新跑过 `assembleDevShellDebug` 并在 Pixel_9 安装。
 
 ---
 
@@ -387,7 +390,12 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 - **没有断点调试**。按当前规划，调试先放弃。
 - **没有 iOS 包同步**。本 demo 只做 Android；iOS 仍走原代理 demo 或后续方案。
 - **自定义 scheme 二维码兼容性有限**。部分相机 App 不会直接打开 `hybriddemo-dev://`；现在二维码改用 HTTP 配对页 `/pair`，由浏览器再跳转 custom scheme，部分浏览器仍可能要求手动点按钮。相机完全不支持扫码打开网页时，仍需手填配置。
-- **自定义 TCP 绕过了 Android 的 cleartext 限制，但仍是明文且无鉴权**。原生 `Socket` 不受 `NetworkSecurityPolicy` / `usesCleartextTraffic` 约束，所以不需要 `network_security_config.xml` 放行；但公网上任何人都能抓包、篡改和直接下载 bundle。SHA-256 只保证完整性，不提供机密性。仅限内网开发环境；真实方案应在 TCP 之上加 TLS（或走 VPN / mTLS），并配访问控制、审计和限流。
+- **自定义 TCP 绕过了 Android 的 cleartext 限制，但仍是明文且无鉴权**。原生 `Socket` 不受 `NetworkSecurityPolicy` / `usesCleartextTraffic` 约束，所以不需要 `network_security_config.xml` 放行；但公网上任何人都能抓包、篡改、直接下载 bundle，也能 `PUT` 到 `/uploads/` 或订阅事件。SHA-256 只保证完整性，不提供机密性。仅限内网开发环境；真实方案应在 TCP 之上加 TLS（或走 VPN / mTLS），并配访问控制、审计和限流。
+- **没有自动重连**。实时通道断开后 DevShell 只显示断开原因，需要手动再点一次；同步会话每次新建，失败后由用户重试。真实方案应加指数退避重连和断线期间的版本补偿检查。
+- **服务端推送靠轮询 `latest.json`**。`fs.watchFile` 每 500 ms 检查一次文件 hash，不是 inotify；构建完成后最多约 0.5 秒才推送。真实方案可以让构建器在写完后主动通知服务端。
+- **上传目录没有配额和清理**。`PUT` 只允许写 `/uploads/...`，但没有大小配额、保留策略或鉴权，验证时产生的 probe 文件会一直留在 `dist/uploads`。
+- **GET 没有分块和断点续传**。Node 服务端会把整个文件读入内存再编码成一个帧，单帧上限 128 MiB；Android 下载端是流式落盘，但服务端内存仍随文件大小上升。`PUT` 上限 64 MiB、`MESSAGE` 上限 1 MiB。
+- **MESSAGE 只是回显 demo**。服务端把收到的字节原样返回，没有业务路由、订阅分组或离线消息；真实双向业务需要在这层之上定义消息格式和会话语义。
 - **DevShell 是 debug 包**。真实交付应由流水线构建 devShell release 包，前端开发不需要跑 Android 工程。
 - **token 目前在 URL 里**。这符合当前 SSO 的传参方式，日志里也刻意不打印完整 URL；真实 token 应是短期、一次性的。
 
@@ -398,13 +406,13 @@ unzip -p "$APK" 'classes*.dex' | strings | grep -c 'com/example/hybriddebug'
 | 文件 | 作用 |
 | --- | --- |
 | [`core/bundle-builder.js`](core/bundle-builder.js) | 构建 manifest、zip、增量补丁和 latest.json |
-| [`core/bundle-protocol.js`](core/bundle-protocol.js) | 自定义 TCP 帧格式：请求 / 响应编解码、状态码、SHA-256 |
-| [`core/bundle-tcp-client.js`](core/bundle-tcp-client.js) | Node 端自定义 TCP 客户端，供 smoke 测试与调试使用 |
-| [`core/bundle-server.js`](core/bundle-server.js) | 同端口多路复用：`HBT1` 帧走自定义 TCP，其余走 HTTP（仅 `/pair`、`/health`）；开发环境，不做 token 鉴权 |
+| [`core/bundle-protocol.js`](core/bundle-protocol.js) | 自定义 TCP v3 帧格式：16 字节帧头、12 种类型、`RESPONSE` / `PUT` checksum、状态码和大小限制 |
+| [`core/bundle-tcp-client.js`](core/bundle-tcp-client.js) | Node 端持久会话客户端：并发 GET、PUT、MESSAGE、SUBSCRIBE、心跳与自动 PONG，供 smoke 测试与调试使用 |
+| [`core/bundle-server.js`](core/bundle-server.js) | 同端口多路复用：`HBT1` 帧走自定义 TCP v3，其余走 HTTP（仅 `/pair`、`/health`）；持久会话、心跳、GET / PUT、事件广播、`latest.json` 监听；开发环境，不做 token 鉴权 |
 | [`core/bundle-orchestrator.js`](core/bundle-orchestrator.js) | 启停 8080 / 9090，生成 TCP 配对链接与 HTTP 配对页链接 |
 | [`desktop-bundle/main.js`](desktop-bundle/main.js) | Electron 控制台主进程 |
 | [`desktop-bundle/renderer/app.js`](desktop-bundle/renderer/app.js) | 控制台 UI：QR、状态、补丁信息、构建、日志 |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 33 项 HTTP / 自定义 TCP 协议、完整包与补丁校验测试 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 56 项 HTTP / 自定义 TCP v3 协议、并发、双向消息、事件推送、完整包与补丁校验测试 |
 | [`web/bundle/app.js`](web/bundle/app.js) | 手机页面；改 `BUNDLE_NOTE` 体验版本更新 |
 | [`web-react/`](web-react) | 可切换的 React + Vite source，验证真实构建产物 |
 | [`web-debug-plugin/.../DevShellActivity.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/DevShellActivity.kt) | DevShell UI、配对、同步、回滚 |

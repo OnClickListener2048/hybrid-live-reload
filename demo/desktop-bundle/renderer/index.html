@@ -148,10 +148,16 @@
 
     <section class="panel log-panel">
       <div class="panel-head">
-        <h2>服务日志</h2>
+        <h2>
+          服务日志
+          <span class="log-legend">
+            <span class="log-in">← 客户端</span>
+            <span class="log-out">→ 服务端</span>
+          </span>
+        </h2>
         <span class="live-indicator"><span class="live-dot"></span>实时</span>
       </div>
-      <pre id="logs" class="logs">等待日志…</pre>
+      <div id="logs" class="logs" role="log">等待日志…</div>
     </section>
   </main>
 

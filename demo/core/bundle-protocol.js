@@ -4,27 +4,53 @@ const crypto = require('crypto');
 
 // Custom binary protocol used by the bundle sync transport.
 //
-// Request (one per TCP connection):
-//   magic "HBT1" | version u8 | opcode u8 | pathLen u32 | path (UTF-8)
+// v3 is a persistent, full-duplex protocol. Both sides send frames with the
+// same layout; only the magic differs by direction:
 //
-// This is a development-only transport with no authentication, so the request
-// has no token field.
+//   client -> server: "HBT1" | version | type | flags | reserved |
+//                     requestId u32 | payloadLen u32 | payload
+//   server -> client: "HBR1" | ...same layout...
 //
-// Response:
-//   magic "HBR1" | version u8 | status u8 | reserved u16 | bodyLen u64 |
-//   sha256(body) 32 bytes | body
+// requestId correlates requests with responses and lets multiple requests be
+// in flight on one connection. requestId 0 is reserved for unsolicited server
+// events and heartbeat frames.
 //
-// The response checksum lets the client reject a truncated or corrupted
-// latest.json/manifest before it is parsed. Zip/patch files are also checked
-// against the hashes already declared in latest.json/manifest.json.
+// Frame types:
+//   HELLO      client -> server  JSON {client, protocol, capabilities}
+//   WELCOME    server -> client  JSON {server, protocol, heartbeatMs, ...}
+//   GET        client -> server  path (UTF-8)
+//   RESPONSE   server -> client  status u8 | reserved u8 | sha256(body) 32 | body
+//   PUT        client -> server  pathLen u16 | path | sha256(body) 32 | body
+//   MESSAGE    both directions   arbitrary bytes; the demo server echoes it
+//   EVENT      server -> client  JSON {event, data, at}
+//   SUBSCRIBE  client -> server  JSON {events: ["bundle-changed", ...]}
+//   PING       both directions   8-byte timestamp (may be empty)
+//   PONG       both directions   mirrors the PING payload
+//   ERROR      both directions   JSON {ok:false, error, message?}
+//   CLOSE      both directions   empty; graceful shutdown
 //
-// Version 2 removed the legacy tokenLen field from version 1; old clients are
-// intentionally not supported.
+// The response SHA-256 protects file/message payloads against truncation and
+// corruption. It is integrity only: this development transport is still
+// plaintext and unauthenticated.
 
 const REQUEST_MAGIC = Buffer.from('HBT1');
 const RESPONSE_MAGIC = Buffer.from('HBR1');
-const VERSION = 2;
-const OP_GET = 1;
+const VERSION = 3;
+
+const TYPE = Object.freeze({
+  HELLO: 1,
+  WELCOME: 2,
+  GET: 3,
+  RESPONSE: 4,
+  PUT: 5,
+  MESSAGE: 6,
+  EVENT: 7,
+  SUBSCRIBE: 8,
+  PING: 9,
+  PONG: 10,
+  ERROR: 11,
+  CLOSE: 12,
+});
 
 const STATUS = Object.freeze({
   OK: 0,
@@ -34,96 +60,179 @@ const STATUS = Object.freeze({
   SERVER_ERROR: 4,
 });
 
-const REQUEST_HEADER_SIZE = 10;
-const RESPONSE_HEADER_SIZE = 48;
+const TYPE_NAMES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(TYPE).map(([name, value]) => [value, name])
+  )
+);
+
+const FRAME_HEADER_SIZE = 16;
+const MAX_PAYLOAD_BYTES = 128 * 1024 * 1024;
+const MAX_GET_BYTES = 128 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+const MAX_MESSAGE_BYTES = 1024 * 1024;
+const MAX_CONTROL_BYTES = 64 * 1024;
 const MAX_PATH_BYTES = 4096;
-const MAX_REQUEST_BYTES = REQUEST_HEADER_SIZE + MAX_PATH_BYTES;
+const RESPONSE_PREFIX_SIZE = 34; // status + reserved + sha256
+const PUT_PREFIX_SIZE = 34; // pathLen + sha256
 
 function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest();
 }
 
-function encodeRequest({ path, opcode = OP_GET } = {}) {
-  const pathBytes = Buffer.from(String(path || ''), 'utf8');
-  if (pathBytes.length > MAX_PATH_BYTES) {
-    throw new Error('request path is too large');
-  }
-
-  const header = Buffer.alloc(REQUEST_HEADER_SIZE);
-  REQUEST_MAGIC.copy(header, 0);
-  header.writeUInt8(VERSION, 4);
-  header.writeUInt8(opcode, 5);
-  header.writeUInt32BE(pathBytes.length, 6);
-  return Buffer.concat([header, pathBytes]);
+function isKnownType(type) {
+  return Number.isInteger(type) && type >= TYPE.HELLO && type <= TYPE.CLOSE;
 }
 
-// Returns null while the header/body is incomplete. Returns { error } for a
-// complete but invalid frame, otherwise { opcode, path, total }.
-function parseRequest(buffer) {
-  if (buffer.length < REQUEST_HEADER_SIZE) return null;
-  if (!buffer.subarray(0, 4).equals(REQUEST_MAGIC)) {
+function typeName(type) {
+  return TYPE_NAMES[type] || `type_${type}`;
+}
+
+function encodeFrame({
+  magic = REQUEST_MAGIC,
+  type,
+  requestId = 0,
+  payload = Buffer.alloc(0),
+} = {}) {
+  if (!Buffer.isBuffer(magic) || magic.length !== 4) {
+    throw new Error('frame magic must be 4 bytes');
+  }
+  if (!isKnownType(type)) {
+    throw new Error('unknown frame type');
+  }
+  if (!Number.isInteger(requestId) || requestId < 0 || requestId > 0xffffffff) {
+    throw new Error('invalid requestId');
+  }
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  if (body.length > MAX_PAYLOAD_BYTES) {
+    throw new Error('frame payload is too large');
+  }
+
+  const header = Buffer.alloc(FRAME_HEADER_SIZE);
+  magic.copy(header, 0);
+  header.writeUInt8(VERSION, 4);
+  header.writeUInt8(type, 5);
+  header.writeUInt8(0, 6); // flags
+  header.writeUInt8(0, 7); // reserved
+  header.writeUInt32BE(requestId, 8);
+  header.writeUInt32BE(body.length, 12);
+  return Buffer.concat([header, body]);
+}
+
+// Parses the first complete frame in buffer. Returns null while incomplete,
+// {error} for an invalid frame, otherwise {type, requestId, payload, total}.
+// Extra bytes after a valid frame are left for the next call.
+function parseFrame(buffer, { magic = REQUEST_MAGIC } = {}) {
+  if (buffer.length < FRAME_HEADER_SIZE) return null;
+  if (!buffer.subarray(0, 4).equals(magic)) {
     return { error: 'bad_magic' };
   }
   if (buffer.readUInt8(4) !== VERSION) {
     return { error: 'unsupported_version' };
   }
-  const opcode = buffer.readUInt8(5);
-  const pathLength = buffer.readUInt32BE(6);
-  if (pathLength > MAX_PATH_BYTES) {
-    return { error: 'request_too_large' };
+  if (buffer.readUInt8(6) !== 0 || buffer.readUInt8(7) !== 0) {
+    return { error: 'unsupported_flags' };
   }
 
-  const total = REQUEST_HEADER_SIZE + pathLength;
-  if (buffer.length < total) return null;
-  if (buffer.length > total) return { error: 'trailing_bytes' };
+  const type = buffer.readUInt8(5);
+  if (!isKnownType(type)) {
+    return { error: 'unsupported_type' };
+  }
+  const requestId = buffer.readUInt32BE(8);
+  const payloadLength = buffer.readUInt32BE(12);
+  if (payloadLength > MAX_PAYLOAD_BYTES) {
+    return { error: 'payload_too_large' };
+  }
 
+  const total = FRAME_HEADER_SIZE + payloadLength;
+  if (buffer.length < total) return null;
   return {
-    opcode,
-    path: buffer.subarray(REQUEST_HEADER_SIZE, total).toString('utf8'),
+    type,
+    requestId,
+    payload: buffer.subarray(FRAME_HEADER_SIZE, total),
     total,
   };
 }
 
-function encodeResponse(status, body = Buffer.alloc(0)) {
-  const payload = Buffer.isBuffer(body) ? body : Buffer.from(body);
-  const header = Buffer.alloc(RESPONSE_HEADER_SIZE);
-  RESPONSE_MAGIC.copy(header, 0);
-  header.writeUInt8(VERSION, 4);
-  header.writeUInt8(status, 5);
-  header.writeUInt16BE(0, 6);
-  header.writeBigUInt64BE(BigInt(payload.length), 8);
-  sha256(payload).copy(header, 16);
-  return Buffer.concat([header, payload]);
+function encodeResponsePayload(status, body = Buffer.alloc(0)) {
+  const data = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  const payload = Buffer.alloc(RESPONSE_PREFIX_SIZE + data.length);
+  payload.writeUInt8(status, 0);
+  payload.writeUInt8(0, 1);
+  sha256(data).copy(payload, 2);
+  data.copy(payload, RESPONSE_PREFIX_SIZE);
+  return payload;
 }
 
-// Returns null while the response is incomplete. Throws on a malformed frame
-// or a checksum mismatch, so callers cannot accidentally parse corrupt data.
-function parseResponse(buffer) {
-  if (buffer.length < RESPONSE_HEADER_SIZE) return null;
-  if (!buffer.subarray(0, 4).equals(RESPONSE_MAGIC)) {
-    throw new Error('bad response magic');
+// Throws on a malformed payload or checksum mismatch, so callers cannot
+// accidentally use corrupt data.
+function parseResponsePayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length < RESPONSE_PREFIX_SIZE) {
+    throw new Error('response payload is too short');
   }
-  if (buffer.readUInt8(4) !== VERSION) {
-    throw new Error('unsupported response version');
-  }
-
-  const status = buffer.readUInt8(5);
-  const bodyLength = Number(buffer.readBigUInt64BE(8));
-  if (!Number.isSafeInteger(bodyLength) || bodyLength < 0) {
-    throw new Error('invalid response length');
-  }
-
-  const total = RESPONSE_HEADER_SIZE + bodyLength;
-  if (buffer.length < total) return null;
-  if (buffer.length > total) throw new Error('trailing response bytes');
-
-  const body = buffer.subarray(RESPONSE_HEADER_SIZE, total);
-  const expected = buffer.subarray(16, 48);
+  const status = payload.readUInt8(0);
+  const expected = payload.subarray(2, 34);
+  const body = payload.subarray(RESPONSE_PREFIX_SIZE);
   const actual = sha256(body);
   if (!crypto.timingSafeEqual(expected, actual)) {
     throw new Error('response checksum mismatch');
   }
   return { status, body };
+}
+
+function encodePutPayload(path, body = Buffer.alloc(0)) {
+  const pathBytes = Buffer.from(String(path || ''), 'utf8');
+  if (pathBytes.length === 0 || pathBytes.length > 0xffff) {
+    throw new Error('upload path is too large');
+  }
+  if (pathBytes.length > MAX_PATH_BYTES) {
+    throw new Error('upload path is too large');
+  }
+  const data = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  if (data.length > MAX_UPLOAD_BYTES) {
+    throw new Error('upload body is too large');
+  }
+  const payload = Buffer.alloc(2 + pathBytes.length + 32 + data.length);
+  payload.writeUInt16BE(pathBytes.length, 0);
+  pathBytes.copy(payload, 2);
+  sha256(data).copy(payload, 2 + pathBytes.length);
+  data.copy(payload, PUT_PREFIX_SIZE + pathBytes.length);
+  return payload;
+}
+
+function parsePutPayload(payload) {
+  if (!Buffer.isBuffer(payload) || payload.length < PUT_PREFIX_SIZE) {
+    throw new Error('put payload is too short');
+  }
+  const pathLength = payload.readUInt16BE(0);
+  const bodyOffset = 2 + pathLength + 32;
+  if (pathLength === 0 || pathLength > MAX_PATH_BYTES) {
+    throw new Error('invalid upload path length');
+  }
+  if (payload.length < bodyOffset) {
+    throw new Error('put payload is truncated');
+  }
+  const expected = payload.subarray(2 + pathLength, bodyOffset);
+  const body = payload.subarray(bodyOffset);
+  if (body.length > MAX_UPLOAD_BYTES) {
+    throw new Error('upload body is too large');
+  }
+  const actual = sha256(body);
+  if (!crypto.timingSafeEqual(expected, actual)) {
+    throw new Error('put checksum mismatch');
+  }
+  return {
+    path: payload.subarray(2, 2 + pathLength).toString('utf8'),
+    body,
+  };
+}
+
+function jsonPayload(value) {
+  return Buffer.from(JSON.stringify(value), 'utf8');
+}
+
+function parseJsonPayload(payload) {
+  return JSON.parse(Buffer.isBuffer(payload) ? payload.toString('utf8') : payload);
 }
 
 function statusName(status) {
@@ -147,16 +256,26 @@ module.exports = {
   REQUEST_MAGIC,
   RESPONSE_MAGIC,
   VERSION,
-  OP_GET,
+  TYPE,
   STATUS,
-  REQUEST_HEADER_SIZE,
-  RESPONSE_HEADER_SIZE,
+  FRAME_HEADER_SIZE,
+  MAX_PAYLOAD_BYTES,
+  MAX_GET_BYTES,
+  MAX_UPLOAD_BYTES,
+  MAX_MESSAGE_BYTES,
+  MAX_CONTROL_BYTES,
   MAX_PATH_BYTES,
-  MAX_REQUEST_BYTES,
+  RESPONSE_PREFIX_SIZE,
+  PUT_PREFIX_SIZE,
   sha256,
-  encodeRequest,
-  parseRequest,
-  encodeResponse,
-  parseResponse,
+  encodeFrame,
+  parseFrame,
+  encodeResponsePayload,
+  parseResponsePayload,
+  encodePutPayload,
+  parsePutPayload,
+  jsonPayload,
+  parseJsonPayload,
   statusName,
+  typeName,
 };

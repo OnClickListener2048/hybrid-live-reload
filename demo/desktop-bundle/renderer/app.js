@@ -31,15 +31,40 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
   }
 
+  function logLineClass(line) {
+    if (
+      /\b(?:failed|timeout|refused)\b/i.test(line) ||
+      line.includes('socket error') ||
+      line.includes('] ! ') ||
+      line.includes('status=server_error') ||
+      /\] [←→] ERROR\b/.test(line)
+    ) {
+      return 'log-line log-error';
+    }
+    if (line.includes('EVENT') || line.includes('bundle changed')) {
+      return 'log-line log-event';
+    }
+    if (line.includes('] ← ')) return 'log-line log-in';
+    if (line.includes('] → ')) return 'log-line log-out';
+    return 'log-line';
+  }
+
   function renderLogs() {
     const box = $('logs');
     const pinned = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
-    box.textContent =
-      state.logs.length === 0
-        ? '等待日志…'
-        : state.logs
-            .map((entry) => `[${formatTime(entry.at)}] ${entry.line}`)
-            .join('\n');
+
+    if (state.logs.length === 0) {
+      box.textContent = '等待日志…';
+    } else {
+      const fragment = document.createDocumentFragment();
+      for (const entry of state.logs) {
+        const row = document.createElement('div');
+        row.className = logLineClass(entry.line);
+        row.textContent = `[${formatTime(entry.at)}] ${entry.line}`;
+        fragment.appendChild(row);
+      }
+      box.replaceChildren(fragment);
+    }
     if (pinned) box.scrollTop = box.scrollHeight;
   }
 

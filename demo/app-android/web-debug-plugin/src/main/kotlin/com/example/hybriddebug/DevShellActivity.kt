@@ -16,6 +16,9 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONObject
+import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -39,6 +42,8 @@ class DevShellActivity : Activity() {
     private lateinit var localButton: Button
     private lateinit var prodButton: Button
     private lateinit var clearButton: Button
+    private lateinit var realtimeButton: Button
+    private lateinit var uploadButton: Button
 
     private lateinit var store: BundleStore
     private lateinit var webViewClient: LocalBundleWebViewClient
@@ -46,6 +51,12 @@ class DevShellActivity : Activity() {
     private lateinit var executor: ExecutorService
     private var localMode = false
     private var syncing = false
+
+    @Volatile
+    private var realtimeSession: BundleTcpClient.Session? = null
+
+    @Volatile
+    private var realtimeConnecting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,6 +113,8 @@ class DevShellActivity : Activity() {
         localButton = findViewById(R.id.local_button)
         prodButton = findViewById(R.id.prod_button)
         clearButton = findViewById(R.id.clear_button)
+        realtimeButton = findViewById(R.id.realtime_button)
+        uploadButton = findViewById(R.id.upload_button)
         statusView.movementMethod = ScrollingMovementMethod()
     }
 
@@ -191,11 +204,14 @@ class DevShellActivity : Activity() {
             setStatus("生产模式：静态资源来自生产服务器")
         }
         clearButton.setOnClickListener { clearBundles() }
+        realtimeButton.setOnClickListener { toggleRealtime() }
+        uploadButton.setOnClickListener { probeDuplex() }
         togglePanelButton.setOnClickListener {
             val visible = devPanel.visibility == View.VISIBLE
             devPanel.visibility = if (visible) View.GONE else View.VISIBLE
             togglePanelButton.text = if (visible) "展开" else "收起"
         }
+        updateRealtimeUi()
     }
 
     private fun syncNow() {
@@ -247,6 +263,185 @@ class DevShellActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun toggleRealtime() {
+        val current = realtimeSession
+        if (current != null) {
+            realtimeSession = null
+            current.close()
+            updateRealtimeUi()
+            setStatus("实时通道已关闭")
+            return
+        }
+        if (realtimeConnecting || syncing) return
+
+        val server = serverInput.text.toString().trim()
+        if (server.isEmpty()) {
+            setStatus("请填写同步服务器地址")
+            return
+        }
+        saveConfig(false)
+        realtimeConnecting = true
+        updateRealtimeUi()
+        setStatus("正在连接实时通道…")
+
+        executor.execute {
+            val session = try {
+                BundleTcpClient.Session(BundleTcpClient.parseEndpoint(server))
+            } catch (err: Exception) {
+                runOnUiThread {
+                    realtimeConnecting = false
+                    updateRealtimeUi()
+                    setStatus("实时通道连接失败：${err.message}")
+                }
+                return@execute
+            }
+            realtimeSession = session
+            session.listener = object : BundleTcpClient.Listener {
+                override fun onEvent(name: String, data: JSONObject?) {
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        when (name) {
+                            "bundle-changed" -> {
+                                val version = data?.optString("version").orEmpty()
+                                setStatus("收到服务端推送：新包 $version，开始同步…")
+                                syncNow()
+                            }
+                            "upload" -> {
+                                val path = data?.optString("path").orEmpty()
+                                setStatus("收到服务端推送：上传事件 $path")
+                            }
+                            "error" -> {
+                                val error = data?.optString("error") ?: "未知"
+                                setStatus("实时通道错误：$error")
+                            }
+                        }
+                    }
+                }
+
+                override fun onClosed(reason: String?) {
+                    runOnUiThread {
+                        if (realtimeSession === session) {
+                            realtimeSession = null
+                            updateRealtimeUi()
+                            if (!isFinishing) {
+                                setStatus("实时通道断开：${reason ?: "未知原因"}")
+                            }
+                        }
+                    }
+                }
+            }
+
+            try {
+                val welcome = session.connect()
+                val subscription = session.subscribe(
+                    listOf("bundle-changed", "upload")
+                )
+                val events = subscription.optJSONArray("events")?.length() ?: 0
+                runOnUiThread {
+                    realtimeConnecting = false
+                    if (realtimeSession !== session || isFinishing) {
+                        if (realtimeSession === session) realtimeSession = null
+                        session.close()
+                        updateRealtimeUi()
+                        return@runOnUiThread
+                    }
+                    updateRealtimeUi()
+                    setStatus(
+                        "实时通道已连接（protocol ${welcome.protocol}，" +
+                            "订阅 $events 个事件，心跳 ${welcome.heartbeatMs}ms）"
+                    )
+                }
+            } catch (err: Exception) {
+                if (realtimeSession === session) realtimeSession = null
+                session.close()
+                runOnUiThread {
+                    realtimeConnecting = false
+                    updateRealtimeUi()
+                    if (isFinishing) return@runOnUiThread
+                    val message = err.message ?: err.javaClass.simpleName
+                    setStatus("实时通道连接失败：$message")
+                }
+            }
+        }
+    }
+
+    /**
+     * Exercises both directions of the custom TCP channel: PUT, GET back and
+     * an echoed MESSAGE. Reuses the realtime session when one is connected.
+     */
+    private fun probeDuplex() {
+        if (syncing || realtimeConnecting) return
+        val server = serverInput.text.toString().trim()
+        if (server.isEmpty()) {
+            setStatus("请填写同步服务器地址")
+            return
+        }
+        saveConfig(false)
+        uploadButton.isEnabled = false
+        setStatus("正在测试双向通道（PUT + GET + MESSAGE）…")
+
+        executor.execute {
+            val existing = realtimeSession
+            val ownSession = existing == null
+            val session = existing ?: try {
+                BundleTcpClient.Session(BundleTcpClient.parseEndpoint(server))
+            } catch (err: Exception) {
+                runOnUiThread {
+                    uploadButton.isEnabled = !syncing && !realtimeConnecting
+                    setStatus("双向通道测试失败：${err.message}")
+                }
+                return@execute
+            }
+            try {
+                if (ownSession) session.connect()
+                val stamp = System.currentTimeMillis()
+                val path = "/uploads/android/probe-$stamp.txt"
+                val body = "android upload $stamp".toByteArray(StandardCharsets.UTF_8)
+                val uploaded = session.put(path, body)
+                val readBack = session.get(path, 1024L * 1024, "上传回读")
+                if (!readBack.contentEquals(body)) {
+                    throw IOException("上传回读内容不一致")
+                }
+                val messageBody = "android message $stamp"
+                    .toByteArray(StandardCharsets.UTF_8)
+                val echoed = session.message(messageBody)
+                if (!echoed.contentEquals(messageBody)) {
+                    throw IOException("消息回显不一致")
+                }
+                val hash = uploaded.optString("sha256").take(12)
+                runOnUiThread {
+                    uploadButton.isEnabled = !syncing && !realtimeConnecting
+                    if (isFinishing) return@runOnUiThread
+                    val message = "双向通道测试成功：PUT $path" +
+                        "（${body.size} B，sha $hash…）+ GET 回读 + MESSAGE 回显"
+                    setStatus(message)
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                }
+            } catch (err: Exception) {
+                Log.w(TAG, "duplex probe failed", err)
+                runOnUiThread {
+                    uploadButton.isEnabled = !syncing && !realtimeConnecting
+                    if (isFinishing) return@runOnUiThread
+                    val message = err.message ?: err.javaClass.simpleName
+                    setStatus("双向通道测试失败：$message")
+                }
+            } finally {
+                if (ownSession) session.close()
+            }
+        }
+    }
+
+    private fun updateRealtimeUi() {
+        if (!this::realtimeButton.isInitialized) return
+        realtimeButton.text = when {
+            realtimeConnecting -> "连接中…"
+            realtimeSession != null -> "实时通道：开"
+            else -> "实时通道：关"
+        }
+        realtimeButton.isEnabled = !syncing && !realtimeConnecting
+        uploadButton.isEnabled = !syncing && !realtimeConnecting
     }
 
     private fun rollback() {
@@ -328,6 +523,7 @@ class DevShellActivity : Activity() {
         localButton.isEnabled = enabled
         prodButton.isEnabled = enabled
         clearButton.isEnabled = enabled
+        updateRealtimeUi()
     }
 
     private fun saveConfig(showToast: Boolean) {
@@ -352,6 +548,9 @@ class DevShellActivity : Activity() {
     }
 
     override fun onDestroy() {
+        val session = realtimeSession
+        realtimeSession = null
+        session?.close()
         if (this::executor.isInitialized) executor.shutdownNow()
         if (this::webView.isInitialized) {
             webView.destroy()

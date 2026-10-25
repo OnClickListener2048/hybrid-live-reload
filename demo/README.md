@@ -9,7 +9,7 @@
 
 > 这是用于演示原理的工程，不是生产实现。真实方案（HTTPS + Whistle + VSCode 插件/桌面端）见 [`../SELECTION.md`](../SELECTION.md)。
 
-> **另一个 demo：包同步 + 增量补丁。** 不配 Wi-Fi 代理，手机经自定义 TCP 从电脑下载带 SHA-256 校验的 Web 包（同一端口还提供 HTTP 配对页）；有旧版本时只下载变化的文件，补丁失败自动回退完整包。仍然用生产 origin 加载本地文件。构建 source 可以是纯静态目录，也可以切换到真实的 React + Vite 工程（[`web-react/`](web-react)）。见 [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md)。
+> **另一个 demo：包同步 + 增量补丁。** 不配 Wi-Fi 代理，手机经自定义 TCP 从电脑下载带 SHA-256 校验的 Web 包（同一端口还提供 HTTP 配对页）；有旧版本时只下载变化的文件，补丁失败自动回退完整包。TCP 通道是持久双向的：支持并发请求 ID、客户端 `PUT` 上传、服务端 `EVENT` 推送和心跳，构建新版本后手机可以自动同步。仍然用生产 origin 加载本地文件。构建 source 可以是纯静态目录，也可以切换到真实的 React + Vite 工程（[`web-react/`](web-react)）。见 [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md)。
 
 ![桌面控制台](docs/desktop-console.png)
 
@@ -169,17 +169,17 @@ adb shell settings put global http_proxy :0
 
 这条链路不配 Wi-Fi 代理。电脑在 `9090` 上同时提供两件事：
 
-- 自定义二进制 TCP 协议：DevShell 用它下载 `latest.json`、完整包和增量补丁；
+- 自定义二进制 TCP 协议：DevShell 用它下载 `latest.json`、完整包和增量补丁，也支持上传、消息和服务端推送；
 - 普通 HTTP：只提供 `/pair` 配对页和 `/health` 健康检查，**不通过 HTTP 暴露 bundle 数据**。
 
 ### 5.1 为什么用自定义 TCP
 
 Android 的明文策略（`usesCleartextTraffic` / `network_security_config.xml`）由 HTTP 栈和 WebView 执行，例如 `HttpURLConnection`、OkHttp、WebView 的网络请求。`java.net.Socket` 是原始 TCP，不经过 `NetworkSecurityPolicy`，所以即使把 `usesCleartextTraffic` 设为 `false`，自定义 TCP 同步仍然可以工作。
 
-实测结果：
+协议 v2 时期的实测结果（v3 仍走同一条原生 `Socket` 路径，但没有在 cleartext 关闭的 APK 上重跑）：
 
 - `usesCleartextTraffic="false"` 时，WebView 打开生产页报 `net::ERR_CLEARTEXT_NOT_PERMITTED`；
-- 同一个 APK 通过自定义 TCP 完成 `latest.json`、`bundle.zip` 下载和校验，成功应用 v3 / v4 包。
+- 同一个 APK 通过自定义 TCP 完成 `latest.json`、`bundle.zip` 下载和校验，成功应用 bundle v3 / v4。
 
 注意这只是绕过了**策略**，没有解决**安全**：TCP 上仍然是明文，也没有鉴权。SHA-256 只保证完整性，不提供机密性。仅限内网开发环境；真实方案需要在 TCP 之上加 TLS（或 VPN / mTLS），并配访问控制、审计和限流。
 
@@ -189,13 +189,13 @@ Android 的明文策略（`usesCleartextTraffic` / `network_security_config.xml`
 cd demo
 npm run bundle:demo       # Electron 控制台
 npm run bundle:headless   # 无界面，只打印配对信息
-npm run bundle:smoke      # 33 项自定义 TCP / bundle / patch 检查
+npm run bundle:smoke      # 56 项自定义 TCP / bundle / patch 检查
 ```
 
 | 端口 | 协议 | 作用 |
 | --- | --- | --- |
 | 8080 | HTTP | mock 生产站点和 API，WebView 的 origin |
-| 9090 | 自定义 TCP + HTTP | bundle 下载走 TCP；`/pair`、`/health` 走 HTTP |
+| 9090 | 自定义 TCP + HTTP | bundle 下载、上传、消息和推送走 TCP；`/pair`、`/health` 走 HTTP |
 
 配对深链不再需要 token：
 
@@ -213,7 +213,7 @@ http://<电脑IP>:9090/pair?server=tcp%3A%2F%2F<电脑IP>%3A9090&prod=http%3A%2F
 
 ```bash
 curl http://127.0.0.1:9090/health
-# {"ok":true,"service":"bundle-server","transport":"custom-tcp","protocol":2,...}
+# {"ok":true,"service":"bundle-server","transport":"custom-tcp","protocol":3,...}
 ```
 
 ### 5.3 同一端口复用
@@ -226,35 +226,54 @@ curl http://127.0.0.1:9090/health
 
 因此 bundle 数据永远不会通过 HTTP 返回；对 `http://...:9090/latest.json` 的请求是 404。
 
-每个 TCP 连接只处理一个 GET 请求，响应完成后服务端关闭连接，不支持 keep-alive、流水线或断点续传。
+TCP 连接建立后是**持久、全双工**的：客户端先发 `HELLO`，之后可以在同一条连接上并发发送 `GET` / `PUT` / `MESSAGE` / `SUBSCRIBE` / `PING`；服务端可以随时返回 `RESPONSE`、回显 `MESSAGE`、推送 `EVENT` 或发送 `PING`。响应用 `requestId` 关联，可以乱序到达。只有 `CLOSE` 或协议错误会关闭连接。
 
-> 模拟器 NAT 有一个坑：如果服务端写完 body 立刻发 FIN，偶尔会丢掉最后一个字节。服务端在 `write` 回调后延迟 50 ms 再 `end()`，这个问题已通过 30/30 次同步验证。
+> 模拟器 NAT 有一个坑：如果服务端写完最后一帧立刻发 FIN，偶尔会丢掉最后一个字节。关闭路径仍然保留“写回调后延迟 50 ms 再 `end()`”的处理；正常同步连接不再每请求关闭。
 
 ### 5.4 线协议
 
 实现位于 [`core/bundle-protocol.js`](core/bundle-protocol.js)，Android 端对应 [`BundleTcpClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleTcpClient.kt)。
 
-#### 请求（客户端 → 服务端）
+#### 帧头（两个方向相同）
 
 ```text
 偏移  长度  字段
-0     4     magic = "HBT1"
-4     1     version = 2
-5     1     opcode = 1（GET）
-6     4     pathLen，大端
-10    ...   path（UTF-8，长度为 pathLen）
+0     4     magic：客户端 → 服务端 "HBT1"，服务端 → 客户端 "HBR1"
+4     1     version = 3
+5     1     type
+6     1     flags = 0
+7     1     reserved = 0
+8     4     requestId，大端 u32
+12    4     payloadLen，大端 u32
+16    ...   payload
 ```
 
-请求头固定 10 字节，**没有 token 字段，也没有任何鉴权字段**。协议版本 2 删掉了版本 1 里的 `tokenLen` + token；这里不再兼容旧客户端。
+- `requestId` 用来关联请求和响应，允许同一条连接上多个请求同时在途、响应乱序返回；`0` 保留给服务端主动发送的 `EVENT` 和心跳。
+- 多个帧可以在一次 `write` 里连续发送；解析器会缓存不完整帧。与 v2 不同，第一帧之后的多余字节属于下一帧，不再视为尾随错误。
+- 未知版本、类型、非零 `flags` / `reserved` 或超限帧会收到 `ERROR` 帧，随后连接关闭；超大 `MESSAGE` 返回 `ERROR`，但连接保留。
+- **没有 token 字段，也没有任何鉴权字段**。协议 v3 与 v2 不兼容，旧客户端会收到版本错误。
 
-请求约束：
+#### 帧类型
 
-- `path` 必须非空、以 `/` 开头、不能包含 NUL；
-- `path` 最大 4096 字节；整帧最大 10 + 4096 字节；
-- 帧解析完成后如果还有多余字节，按 `trailing_bytes` 拒绝；
-- 只支持版本 2 和 opcode 1，其他值返回 `BAD_REQUEST`。
+| type | 名称 | 方向 | payload |
+| --- | --- | --- | --- |
+| 1 | HELLO | C → S | JSON：`{client, protocol, capabilities}` |
+| 2 | WELCOME | S → C | JSON：`{server, protocol, heartbeatMs, maxPayloadBytes, maxUploadBytes, capabilities}` |
+| 3 | GET | C → S | path（UTF-8） |
+| 4 | RESPONSE | S → C | `status u8 \| reserved u8 \| SHA-256(body) 32 \| body` |
+| 5 | PUT | C → S | `pathLen u16 \| path \| SHA-256(body) 32 \| body` |
+| 6 | MESSAGE | 双向 | 任意字节；demo 服务端原样回显 |
+| 7 | EVENT | S → C | JSON：`{event, data, at}` |
+| 8 | SUBSCRIBE | C → S | JSON：`{events: ["bundle-changed", ...]}` |
+| 9 / 10 | PING / PONG | 双向 | 8 字节时间戳；PONG 原样回显 |
+| 11 | ERROR | 双向 | JSON：`{ok:false, error, message?}` |
+| 12 | CLOSE | 双向 | 空 |
 
-允许的 path 只有：
+`RESPONSE` 和 `PUT` 的 body 都带 SHA-256；客户端先校验 checksum，再解析 JSON、写 zip 或落盘。错误响应 body 是 JSON，例如 `{"ok":false,"error":"not_found"}`。
+
+#### GET / PUT / 事件
+
+允许 `GET` 的路径：
 
 ```text
 /latest.json
@@ -262,52 +281,60 @@ curl http://127.0.0.1:9090/health
 /bundles/<version>/manifest.json
 /bundles/<version>/patch-from-<version>.zip
 /bundles/<version>/patch-from-<version>.json
+/uploads/...            # PUT 写入后可通过 GET 读回
 ```
 
 `<version>` 段只允许 `[A-Za-z0-9._-]`，解析后还会检查文件必须落在 `dist/bundles` 目录内，防止路径穿越。
 
-#### 响应（服务端 → 客户端）
+`PUT` 只接受 `/uploads/...`：path 不能为空、不能含 `..` / 反斜杠 / NUL，服务端先写同目录临时文件再原子替换。上传成功会返回 `{ok, path, size, sha256}`，并给订阅了 `upload` 的连接推送事件。
 
-```text
-偏移  长度  字段
-0     4     magic = "HBR1"
-4     1     version = 2
-5     1     status
-6     2     reserved = 0
-8     8     bodyLen，大端 u64
-16    32    SHA-256(body)
-48    ...   body
-```
+`SUBSCRIBE` 支持的事件：
 
-响应头固定 48 字节。`bodyLen` 之后紧跟 body，body 的 SHA-256 写在头部；客户端先校验 checksum，再解析 JSON 或写 zip。错误响应的 body 是 JSON，例如 `{"ok":false,"error":"not_found"}`。
+- `bundle-changed`：服务端每 500 ms 检查 `latest.json`，版本 SHA-256 变化时推送 `{version, sha256, size}`；
+- `upload`：任意客户端 `PUT` 成功后推送 `{path, size, sha256}`。
 
 状态码：
 
 | status | 名称 | 含义 |
 | --- | --- | --- |
-| 0 | OK | 成功，body 是文件内容 |
-| 1 | BAD_REQUEST | magic / 版本 / opcode / 帧格式 / path 不合法 |
+| 0 | OK | 成功，body 是文件内容或 JSON |
+| 1 | BAD_REQUEST | path 不合法、PUT 格式或订阅参数错误 |
 | 2 | NOT_FOUND | 路径不在白名单，或文件不存在 |
-| 3 | TOO_LARGE | 响应文件超过 128 MiB |
-| 4 | SERVER_ERROR | 服务端读取文件失败等内部错误 |
+| 3 | TOO_LARGE | 响应或上传超过限制 |
+| 4 | SERVER_ERROR | 服务端读取 / 写入失败等内部错误 |
 
-服务端 socket 空闲超时 30 秒；Android 客户端连接超时 8 秒、读超时 30 秒；Node 测试客户端的请求超时是 10 秒。单次响应上限 128 MiB。服务端会把整个文件读入内存后再编码发送，没有流式分块或断点续传，`bundle.zip` 很大时内存占用会同步上升。
+#### 心跳、限制与超时
+
+- 服务端在收到 `HELLO` 后每 15 秒发一次 `PING`，45 秒收不到 `PONG` 就断开；socket 空闲超时 60 秒。
+- Android 客户端在 reader 线程自动回 `PONG`；读取超时取 `max(heartbeat × 3, 45 秒)`，连接超时 8 秒，普通请求 30 秒，下载 120 秒。
+- Node 客户端连接超时 8 秒、普通请求 10 秒，并维护心跳看门狗。
+- 单帧 payload 上限 128 MiB；GET 响应上限 128 MiB；PUT 上限 64 MiB；MESSAGE 上限 1 MiB；控制 JSON / 事件上限 64 KiB；path 上限 4096 字节。
+- 服务端会把整个 GET 文件读入内存后再发一个帧；Android `download()` 把响应 body 直接流式写入文件并边写边算 SHA-256，避免整包驻留内存。当前没有分块传输或断点续传。
+- 连接断开后没有自动重连 / 退避；实时通道断开后需要重新点「实时通道」。同步本身每次新开一条短会话，完成或失败后 `CLOSE`。
 
 ### 5.5 同步流程
 
-1. 深链或手填地址得到 `tcp://host:port`，地址和请求帧里都不含 token；
-2. 通过原生 `Socket` 请求 `/latest.json`，校验帧 checksum、格式和版本号；
-3. 如果当前 active 版本在 `patches` 里有匹配项，先下载 `patch-from-<base>.json` 和 patch zip；
-4. 没有补丁、补丁校验失败或安装失败时，自动回退下载完整 `bundle.zip`；
-5. 下载时校验 `latest.json` / manifest 里声明的 size 和 SHA-256；
-6. 解压时拒绝路径穿越、重复条目、未知文件和超限大小，再逐文件校验 hash；
-7. staging 校验通过后原子切换 `active` / `previous`，补丁流程还要把上一版未变化的文件复制进 staging。
+1. 深链或手填地址得到 `tcp://host:port`，地址和帧里都不含 token；
+2. 建立原生 `Socket` 连接，先发 `HELLO`（`client`、`protocol: 3`），收到 `WELCOME` 后开始请求；同一条连接上可以并发多个带 `requestId` 的请求；
+3. `GET /latest.json`，校验帧格式、版本号和 `RESPONSE` 里的 SHA-256；
+4. 如果当前 active 版本在 `patches` 里有匹配项，先 `GET` `patch-from-<base>.json` 和 patch zip；
+5. 没有补丁、补丁校验失败或安装失败时，自动回退 `GET` 完整 `bundle.zip`；
+6. 下载时校验 `latest.json` / manifest 里声明的 size 和 SHA-256；Android 的 `download()` 边收边写文件边算 hash；
+7. 解压时拒绝路径穿越、重复条目、未知文件和超限大小，再逐文件校验 hash；
+8. staging 校验通过后原子切换 `active` / `previous`，补丁流程还要把上一版未变化的文件复制进 staging；
+9. 同步结束发送 `CLOSE` 并关闭这条会话。每次同步新开一条会话，不复用实时通道。
 
 补丁仍然是**文件级增量**，不是二进制 diff；改一行 `app.js` 仍要下载压缩后的整个 `app.js`。
 
+可选地，DevShell 的「实时通道」会建立一条长期会话并 `SUBSCRIBE ["bundle-changed", "upload"]`：
+
+- 服务端检测到 `latest.json` 的 SHA-256 变化后推送 `bundle-changed`，客户端收到后自动触发一次上面的同步流程；
+- 任意客户端 `PUT /uploads/...` 成功后，订阅者收到 `upload` 事件；
+- 「上传 / 消息测试」复用这条实时会话（没有则临时建一条）完成 `PUT` → `GET` 回读 → `MESSAGE` 回显。
+
 ### 5.6 关闭 cleartext 的实测行为
 
-把 `demo/app-android/app/src/main/AndroidManifest.xml` 里的 `android:usesCleartextTraffic` 临时改成 `false`，重新构建安装：
+这一节是**协议 v2 时期**的实测记录；下面的 `v3` / `v4` 指 bundle 版本号，不是协议版本。把 `demo/app-android/app/src/main/AndroidManifest.xml` 里的 `android:usesCleartextTraffic` 临时改成 `false`，重新构建安装：
 
 ```text
 # 清空本地包后点「同步最新包」
@@ -324,27 +351,32 @@ load /sso local=true version=v3
 已应用补丁 v4（3 个变化文件，3.0 KiB；完整包 5.1 KiB，节省 2.1 KiB）；上一版 v3
 ```
 
+协议 v3 仍走同一条 `java.net.Socket` 原生连接，不经过 WebView 或 `NetworkSecurityPolicy`，所以结论不变；但 v3 完成后没有再把 manifest 改回 `false` 重跑一遍，当前安装的 APK 是 `usesCleartextTraffic="true"`。
+
 日常 demo 仍建议保持 `usesCleartextTraffic="true"`，因为 WebView 要加载 `http://<电脑IP>:8080` 的生产页；关闭后只能看到本地 bundle，接口和生产页都会失败。
 
 ### 5.7 关键文件
 
 | 文件 | 作用 |
 | --- | --- |
-| [`core/bundle-protocol.js`](core/bundle-protocol.js) | 请求 / 响应编解码、帧校验、状态码、大小限制 |
-| [`core/bundle-tcp-client.js`](core/bundle-tcp-client.js) | Node 侧 TCP 客户端，供 smoke test 使用 |
-| [`core/bundle-server.js`](core/bundle-server.js) | 单端口复用、HTTP `/pair` `/health`、TCP 文件服务、延迟 FIN |
+| [`core/bundle-protocol.js`](core/bundle-protocol.js) | v3 帧编解码、HELLO/WELCOME、`RESPONSE` / `PUT` checksum、类型 / 状态码 / 大小限制 |
+| [`core/bundle-tcp-client.js`](core/bundle-tcp-client.js) | Node 侧持久会话客户端：并发 GET、PUT、MESSAGE、SUBSCRIBE、心跳与自动 PONG |
+| [`core/bundle-server.js`](core/bundle-server.js) | 单端口复用、持久会话、心跳、GET / PUT、事件广播、`latest.json` 监听、延迟 FIN |
 | [`core/bundle-builder.js`](core/bundle-builder.js) | manifest、zip、增量补丁和 `latest.json` |
-| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 33 项协议 / bundle / patch 校验 |
-| [`app-android/.../BundleTcpClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleTcpClient.kt) | Android 原生 Socket 客户端、帧解析、checksum 校验 |
-| [`app-android/.../BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt) | 补丁选择、下载、校验、原子安装与回退 |
+| [`scripts/bundle-smoke.js`](scripts/bundle-smoke.js) | 56 项 HTTP / TCP 协议 / bundle / patch / 推送校验 |
+| [`app-android/.../BundleTcpClient.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleTcpClient.kt) | Android 原生 Socket 持久会话、并发请求表、流式下载、心跳与事件回调 |
+| [`app-android/.../BundleInstaller.kt`](app-android/web-debug-plugin/src/main/kotlin/com/example/hybriddebug/BundleInstaller.kt) | 每次同步一条会话、补丁选择、下载、校验、原子安装与回退 |
 | [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md) | 包格式、补丁算法、二维码和完整验收记录 |
 
 ### 5.8 已验证
 
-- `npm run bundle:smoke`：33/33 通过，覆盖协议帧、checksum、路径穿越、错误版本 / opcode / 尾随字节、完整包和 v1 + patch 重建；
-- Pixel_9 模拟器：深链无 token 配对，完整包和 `v3 → v4` 补丁均通过自定义 TCP 下载；
-- cleartext 关闭：WebView 报 `ERR_CLEARTEXT_NOT_PERMITTED`，TCP 同步和应用本地包不受影响；
-- 模拟器 NAT 延迟 FIN 修复后，连续 30 次同步无截断。
+- `npm run bundle:smoke`：**56/56 通过**，覆盖 HTTP `/health` `/pair`、握手、8 路并发 GET、路径穿越、畸形帧（版本 / 类型 / flags / 超限）、半包缓存、checksum 损坏、PUT / GET 回读、非法上传路径、MESSAGE 回显、PING、上传事件推送、bundle-changed 推送、完整包和 v1 + patch 重建，以及 `CLOSE` 收尾；
+- Pixel_9 模拟器（协议 v3）：`HELLO client=hybrid-android protocol=3` 握手成功，完整包 v4 通过持久会话下载并应用；
+- 实时通道：`SUBSCRIBE bundle-changed,upload` 成功，界面显示 `protocol 3，订阅 2 个事件，心跳 15000ms`；
+- 双向测试：`PUT /uploads/android/probe-*.txt` + `GET` 回读 + `MESSAGE` 回显一致；
+- 服务端推送：构建 v5 后收到 `bundle-changed`，自动同步 `v4 → v5` 补丁（1 个变化文件，209 B；完整包 5.1 KiB，节省 4.9 KiB）；
+- cleartext 关闭：协议 v2 时期验证 WebView 报 `ERR_CLEARTEXT_NOT_PERMITTED`、TCP 同步和应用本地包不受影响；v3 未重跑该配置；
+- 模拟器 NAT 延迟 FIN 修复后，连续 30 次同步无截断（协议 v2 时期）。
 
 ---
 

@@ -165,6 +165,23 @@ h2 {
   letter-spacing: 0.01em;
 }
 
+.log-legend {
+  margin-left: 8px;
+  font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.log-legend .log-in {
+  color: var(--accent-2);
+}
+
+.log-legend .log-out {
+  margin-left: 6px;
+  color: var(--warn);
+}
+
 .mini-tag {
   color: var(--muted);
   font-size: 10px;
@@ -472,6 +489,26 @@ h2 {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.logs .log-line {
+  min-height: 1.6em;
+}
+
+.logs .log-in {
+  color: var(--accent-2);
+}
+
+.logs .log-out {
+  color: var(--warn);
+}
+
+.logs .log-event {
+  color: var(--ok);
+}
+
+.logs .log-error {
+  color: var(--danger);
 }
 
 .foot {

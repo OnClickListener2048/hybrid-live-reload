@@ -164,6 +164,8 @@ class BundleOrchestrator extends EventEmitter {
       port: ports.bundle,
       root: DEFAULT_OUT,
       logger: (line) => this.log(line),
+      // The desktop console log shows every client/server frame with arrows.
+      traceFrames: true,
     });
     this.services = { prod, bundleServer };
 

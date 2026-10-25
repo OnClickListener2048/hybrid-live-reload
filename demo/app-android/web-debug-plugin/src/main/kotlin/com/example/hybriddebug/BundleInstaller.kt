@@ -58,10 +58,22 @@ internal object BundleInstaller {
     @Throws(Exception::class)
     fun install(store: BundleStore, rawBase: String?): SyncResult {
         val endpoint = BundleTcpClient.parseEndpoint(rawBase)
+        val session = BundleTcpClient.Session(endpoint)
+        try {
+            session.connect()
+            return installWithSession(store, session)
+        } finally {
+            session.close()
+        }
+    }
 
+    @Throws(Exception::class)
+    private fun installWithSession(
+        store: BundleStore,
+        session: BundleTcpClient.Session,
+    ): SyncResult {
         val latestText = String(
-            BundleTcpClient.get(
-                endpoint,
+            session.get(
                 "/latest.json",
                 MAX_LATEST_BYTES,
                 "latest.json",
@@ -106,7 +118,7 @@ internal object BundleInstaller {
             try {
                 return installPatch(
                     store,
-                    endpoint,
+                    session,
                     latest,
                     version,
                     active,
@@ -124,13 +136,13 @@ internal object BundleInstaller {
             }
         }
 
-        return installFull(store, endpoint, latest, version, active, patchFailure)
+        return installFull(store, session, latest, version, active, patchFailure)
     }
 
     @Throws(Exception::class)
     private fun installPatch(
         store: BundleStore,
-        endpoint: BundleTcpClient.Endpoint,
+        session: BundleTcpClient.Session,
         latest: JSONObject,
         version: String,
         baseVersion: String,
@@ -156,8 +168,7 @@ internal object BundleInstaller {
         val expectedPatchSha = patch.getString("sha256").lowercase(Locale.US)
         val fullSize = patch.optLong("fullSize", latest.optLong("size", -1))
 
-        val patchManifestBytes = BundleTcpClient.get(
-            endpoint,
+        val patchManifestBytes = session.get(
             manifestPath,
             MAX_MANIFEST_BYTES,
             "补丁 manifest",
@@ -232,8 +243,7 @@ internal object BundleInstaller {
         try {
             val patchZipFile = store.createTempZip()
             tempZip = patchZipFile
-            val actualPatchSize = BundleTcpClient.download(
-                endpoint,
+            val actualPatchSize = session.download(
                 zipPath,
                 patchZipFile,
                 MAX_BUNDLE_BYTES,
@@ -368,7 +378,7 @@ internal object BundleInstaller {
     @Throws(Exception::class)
     private fun installFull(
         store: BundleStore,
-        endpoint: BundleTcpClient.Endpoint,
+        session: BundleTcpClient.Session,
         latest: JSONObject,
         version: String,
         active: String?,
@@ -384,8 +394,7 @@ internal object BundleInstaller {
         try {
             val zipFile = store.createTempZip()
             tempZip = zipFile
-            val actualZipSize = BundleTcpClient.download(
-                endpoint,
+            val actualZipSize = session.download(
                 zipPath,
                 zipFile,
                 MAX_BUNDLE_BYTES,
