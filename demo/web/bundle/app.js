@@ -2,7 +2,7 @@
   'use strict';
 
   // ----- 改这里，重新构建 + 同步，手机上会立刻看到新文案 -----
-  const BUNDLE_NOTE = '这是 v3：只改了 app.js 一行，手机只下载增量补丁，不下载完整包；origin 和 localStorage 仍然不变。';
+  const BUNDLE_NOTE = '这是 v4：cleartext 已关闭，页面仍是本地包，增量补丁通过自定义 TCP 下载；origin 和 localStorage 仍然不变。';
   // -----------------------------------------------------------
 
   const $ = (id) => document.getElementById(id);
