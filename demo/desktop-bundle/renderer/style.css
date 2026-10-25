@@ -251,25 +251,6 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.token-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: 10px;
-}
-
-.label {
-  color: var(--muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.token-row code {
-  color: var(--accent);
-  font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
-  font-size: 10.5px;
-}
-
 .notice {
   margin-top: 11px;
   padding: 9px 10px;

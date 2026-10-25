@@ -89,7 +89,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="同步服务器 / 一次性 token（扫码会自动填）"
+            android:text="同步服务器（自定义 TCP，扫码会自动填）"
             android:textColor="@color/hybrid_debug_muted"
             android:textSize="9.5sp" />
 
@@ -105,23 +105,8 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:backgroundTint="@color/hybrid_debug_accent"
-                android:hint="http://10.0.2.2:9090"
+                android:hint="tcp://10.0.2.2:9090"
                 android:inputType="textUri"
-                android:maxLines="1"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
-                android:textColor="@color/hybrid_debug_text"
-                android:textColorHint="@color/hybrid_debug_muted"
-                android:textSize="11.5sp" />
-
-            <EditText
-                android:id="@+id/token_input"
-                android:layout_width="112dp"
-                android:layout_height="match_parent"
-                android:layout_marginStart="6dp"
-                android:backgroundTint="@color/hybrid_debug_accent"
-                android:hint="token"
-                android:inputType="text"
                 android:maxLines="1"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"

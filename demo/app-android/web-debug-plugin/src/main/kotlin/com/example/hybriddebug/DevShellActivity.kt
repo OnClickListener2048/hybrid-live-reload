@@ -30,7 +30,6 @@ class DevShellActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var prodInput: EditText
     private lateinit var serverInput: EditText
-    private lateinit var tokenInput: EditText
     private lateinit var statusView: TextView
     private lateinit var activeBadge: TextView
     private lateinit var devPanel: View
@@ -94,7 +93,6 @@ class DevShellActivity : Activity() {
         webView = findViewById(R.id.web_view)
         prodInput = findViewById(R.id.prod_input)
         serverInput = findViewById(R.id.server_input)
-        tokenInput = findViewById(R.id.token_input)
         statusView = findViewById(R.id.status_view)
         activeBadge = findViewById(R.id.active_badge)
         devPanel = findViewById(R.id.dev_panel)
@@ -110,12 +108,12 @@ class DevShellActivity : Activity() {
     private fun restoreConfig() {
         prodInput.setText(prefs.getString(KEY_PROD, DevShellConfig.DEFAULT_PROD_URL))
         serverInput.setText(prefs.getString(KEY_SERVER, DevShellConfig.DEFAULT_SYNC_URL))
-        tokenInput.setText(prefs.getString(KEY_TOKEN, DevShellConfig.DEFAULT_SYNC_TOKEN))
     }
 
     /**
-     * Supports hybriddemo-dev://sync?server=...&token=...&prod=...&auto=1
-     * The desktop console puts this URL in a QR code.
+     * Supports hybriddemo-dev://sync?server=...&prod=...&auto=1
+     * The desktop console puts this URL in a QR code. Older links may also
+     * carry a token parameter; it is ignored because this demo has no auth.
      */
     private fun applyPairIntent(intent: Intent?): Boolean {
         if (intent == null) return false
@@ -125,10 +123,8 @@ class DevShellActivity : Activity() {
         }
 
         val server = data.getQueryParameter("server")
-        val token = data.getQueryParameter("token")
         val prod = data.getQueryParameter("prod")
         if (!server.isNullOrBlank()) serverInput.setText(server.trim())
-        if (!token.isNullOrBlank()) tokenInput.setText(token.trim())
         if (!prod.isNullOrBlank()) prodInput.setText(prod.trim())
         val auto = data.getQueryParameter("auto")
         Log.i(
@@ -205,13 +201,8 @@ class DevShellActivity : Activity() {
     private fun syncNow() {
         if (syncing) return
         val server = serverInput.text.toString().trim()
-        val token = tokenInput.text.toString().trim()
         if (server.isEmpty()) {
             setStatus("请填写同步服务器地址")
-            return
-        }
-        if (token.isEmpty()) {
-            setStatus("请填写同步 token")
             return
         }
 
@@ -222,7 +213,7 @@ class DevShellActivity : Activity() {
 
         executor.execute {
             try {
-                val result = BundleInstaller.install(store, server, token)
+                val result = BundleInstaller.install(store, server)
                 runOnUiThread {
                     syncing = false
                     setButtonsEnabled(true)
@@ -344,7 +335,6 @@ class DevShellActivity : Activity() {
         prefs.edit()
             .putString(KEY_PROD, prod)
             .putString(KEY_SERVER, serverInput.text.toString().trim())
-            .putString(KEY_TOKEN, tokenInput.text.toString().trim())
             .apply()
         if (showToast) {
             Toast.makeText(this, "同步配置已保存", Toast.LENGTH_SHORT).show()
@@ -374,7 +364,6 @@ class DevShellActivity : Activity() {
         private const val PREFS = "hybrid_devshell"
         private const val KEY_PROD = "prod_url"
         private const val KEY_SERVER = "sync_server"
-        private const val KEY_TOKEN = "sync_token"
 
         private fun normalizeProd(raw: String?): String {
             var url = raw?.trim().orEmpty()

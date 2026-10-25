@@ -12,13 +12,11 @@ const {
   DEFAULT_OUT,
 } = require('./bundle-builder');
 
-const SYNC_TOKEN = 'demo-sync-token';
 const DEMO_ROOT = path.join(__dirname, '..');
 
-function pairUrl({ server, prod, token, auto = true }) {
+function pairUrl({ server, prod, auto = true }) {
   const query = new URLSearchParams({
     server,
-    token,
     prod,
     auto: auto ? '1' : '0',
   });
@@ -26,15 +24,16 @@ function pairUrl({ server, prod, token, auto = true }) {
 }
 
 // QR-friendly URL: system cameras understand http(s), then the page opens
-// the custom scheme. Direct deep links still use pairUrl above.
-function pairPageUrl({ server, prod, token, auto = true }) {
+// the custom scheme. The HTTP page only serves the pairing UI; bundle data is
+// fetched by the app over the custom TCP protocol. `pageBase` is the HTTP
+// listener and `server` is the tcp:// endpoint stored in the deep link.
+function pairPageUrl({ pageBase, server, prod, auto = true }) {
   const query = new URLSearchParams({
     server,
-    token,
     prod,
     auto: auto ? '1' : '0',
   });
-  return `${server}/pair?${query.toString()}`;
+  return `${pageBase}/pair?${query.toString()}`;
 }
 
 class BundleOrchestrator extends EventEmitter {
@@ -91,9 +90,11 @@ class BundleOrchestrator extends EventEmitter {
 
   status() {
     const lanIp = getLanIp();
-    const serverLan = `http://${lanIp}:${ports.bundle}`;
+    const pairPageLan = `http://${lanIp}:${ports.bundle}`;
+    const tcpLan = `tcp://${lanIp}:${ports.bundle}`;
     const prodLan = `http://${lanIp}:${ports.prod}`;
-    const serverEmulator = `http://10.0.2.2:${ports.bundle}`;
+    const pairPageEmulator = `http://10.0.2.2:${ports.bundle}`;
+    const tcpEmulator = `tcp://10.0.2.2:${ports.bundle}`;
     const prodEmulator = `http://10.0.2.2:${ports.prod}`;
     return {
       running: this.running,
@@ -103,26 +104,26 @@ class BundleOrchestrator extends EventEmitter {
       lanIp,
       lanIpIsLoopback: lanIp === '127.0.0.1',
       ports,
-      syncToken: SYNC_TOKEN,
       prodUrl: prodLan,
       prodEmulatorUrl: prodEmulator,
-      bundleServerUrl: serverLan,
-      bundleServerEmulatorUrl: serverEmulator,
+      // HTTP is only for the pairing page; the app syncs over custom TCP.
+      bundleServerUrl: pairPageLan,
+      bundleServerEmulatorUrl: pairPageEmulator,
+      bundleTcpUrl: tcpLan,
+      bundleTcpEmulatorUrl: tcpEmulator,
       pairLink: pairUrl({
-        server: serverLan,
+        server: tcpLan,
         prod: prodLan,
-        token: SYNC_TOKEN,
       }),
       // The QR code uses the HTTP page so the system camera can open it.
       qrLink: pairPageUrl({
-        server: serverLan,
+        pageBase: pairPageLan,
+        server: tcpLan,
         prod: prodLan,
-        token: SYNC_TOKEN,
       }),
       pairLinkEmulator: pairUrl({
-        server: serverEmulator,
+        server: tcpEmulator,
         prod: prodEmulator,
-        token: SYNC_TOKEN,
       }),
       sourceDir: this.sourceDir,
       sourceLabel: this.sourceLabel(),
@@ -162,7 +163,6 @@ class BundleOrchestrator extends EventEmitter {
     const bundleServer = createBundleServer({
       port: ports.bundle,
       root: DEFAULT_OUT,
-      token: SYNC_TOKEN,
       logger: (line) => this.log(line),
     });
     this.services = { prod, bundleServer };
@@ -174,7 +174,8 @@ class BundleOrchestrator extends EventEmitter {
       this.startedAt = new Date().toISOString();
       const status = this.status();
       this.log(
-        `ready: prod ${status.prodUrl}, bundles ${status.bundleServerUrl}`
+        `ready: prod ${status.prodUrl}, bundles ${status.bundleTcpUrl} ` +
+          `(pair page ${status.bundleServerUrl})`
       );
       this.emit('status', status);
       return status;

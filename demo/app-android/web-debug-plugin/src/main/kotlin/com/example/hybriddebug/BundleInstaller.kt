@@ -12,8 +12,6 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.DigestOutputStream
 import java.security.MessageDigest
@@ -21,7 +19,10 @@ import java.util.Locale
 import java.util.zip.ZipFile
 
 /**
- * Downloads latest.json and installs the new version.
+ * Downloads latest.json and installs the new version over the custom TCP
+ * bundle protocol (see BundleTcpClient), not HttpURLConnection. That matters
+ * on Android because the cleartext policy is enforced by the HTTP stack, not
+ * by raw sockets.
  *
  * When the active version has a matching patch, only changed files are
  * downloaded and merged into a copy of the active version. Any patch failure
@@ -36,8 +37,6 @@ internal object BundleInstaller {
     private const val MAX_MANIFEST_BYTES = 2L * 1024 * 1024
     private const val MAX_BUNDLE_BYTES = 64L * 1024 * 1024
     private const val MAX_UNCOMPRESSED_BYTES = 128L * 1024 * 1024
-    private const val CONNECT_TIMEOUT_MS = 8000
-    private const val READ_TIMEOUT_MS = 30000
 
     data class SyncResult(
         val updated: Boolean,
@@ -57,18 +56,17 @@ internal object BundleInstaller {
     )
 
     @Throws(Exception::class)
-    fun install(store: BundleStore, rawBase: String?, token: String?): SyncResult {
-        val base = normalizeBase(rawBase)
-        if (token.isNullOrBlank()) {
-            throw IOException("缺少同步 token")
-        }
-        val baseUrl = URL(base)
+    fun install(store: BundleStore, rawBase: String?): SyncResult {
+        val endpoint = BundleTcpClient.parseEndpoint(rawBase)
 
-        val latestText = httpGetText(
-            URL("$base/latest.json"),
-            token,
-            "latest.json",
-            MAX_LATEST_BYTES,
+        val latestText = String(
+            BundleTcpClient.get(
+                endpoint,
+                "/latest.json",
+                MAX_LATEST_BYTES,
+                "latest.json",
+            ),
+            StandardCharsets.UTF_8,
         )
         val latest = JSONObject(latestText)
         if (latest.optInt("format", -1) != FORMAT) {
@@ -108,8 +106,7 @@ internal object BundleInstaller {
             try {
                 return installPatch(
                     store,
-                    baseUrl,
-                    token,
+                    endpoint,
                     latest,
                     version,
                     active,
@@ -127,14 +124,13 @@ internal object BundleInstaller {
             }
         }
 
-        return installFull(store, baseUrl, token, latest, version, active, patchFailure)
+        return installFull(store, endpoint, latest, version, active, patchFailure)
     }
 
     @Throws(Exception::class)
     private fun installPatch(
         store: BundleStore,
-        baseUrl: URL,
-        token: String,
+        endpoint: BundleTcpClient.Endpoint,
         latest: JSONObject,
         version: String,
         baseVersion: String,
@@ -151,21 +147,20 @@ internal object BundleInstaller {
             throw IOException("补丁基础版本和当前版本不一致")
         }
 
-        val manifestUrl = sameOriginUrl(
-            baseUrl,
+        val manifestPath = remotePath(
             patch.getString("manifest"),
             "补丁 manifest",
         )
-        val zipUrl = sameOriginUrl(baseUrl, patch.getString("zip"), "补丁 zip")
+        val zipPath = remotePath(patch.getString("zip"), "补丁 zip")
         val declaredPatchSize = patch.optLong("size", -1)
         val expectedPatchSha = patch.getString("sha256").lowercase(Locale.US)
         val fullSize = patch.optLong("fullSize", latest.optLong("size", -1))
 
-        val patchManifestBytes = httpGetBytes(
-            manifestUrl,
-            token,
-            "补丁 manifest",
+        val patchManifestBytes = BundleTcpClient.get(
+            endpoint,
+            manifestPath,
             MAX_MANIFEST_BYTES,
+            "补丁 manifest",
         )
 
         val patchManifest = JSONObject(
@@ -237,9 +232,9 @@ internal object BundleInstaller {
         try {
             val patchZipFile = store.createTempZip()
             tempZip = patchZipFile
-            val actualPatchSize = httpDownload(
-                zipUrl,
-                token,
+            val actualPatchSize = BundleTcpClient.download(
+                endpoint,
+                zipPath,
                 patchZipFile,
                 MAX_BUNDLE_BYTES,
                 "补丁 zip",
@@ -373,14 +368,13 @@ internal object BundleInstaller {
     @Throws(Exception::class)
     private fun installFull(
         store: BundleStore,
-        baseUrl: URL,
-        token: String,
+        endpoint: BundleTcpClient.Endpoint,
         latest: JSONObject,
         version: String,
         active: String?,
         patchFailure: String?,
     ): SyncResult {
-        val zipUrl = sameOriginUrl(baseUrl, latest.getString("bundle"), "bundle")
+        val zipPath = remotePath(latest.getString("bundle"), "bundle")
         val expectedZipSha = latest.getString("sha256").lowercase(Locale.US)
         val declaredZipSize = latest.optLong("size", -1)
         val fullSize = declaredZipSize
@@ -390,9 +384,9 @@ internal object BundleInstaller {
         try {
             val zipFile = store.createTempZip()
             tempZip = zipFile
-            val actualZipSize = httpDownload(
-                zipUrl,
-                token,
+            val actualZipSize = BundleTcpClient.download(
+                endpoint,
+                zipPath,
                 zipFile,
                 MAX_BUNDLE_BYTES,
                 "bundle.zip",
@@ -523,40 +517,23 @@ internal object BundleInstaller {
     }
 
     @Throws(IOException::class)
-    private fun normalizeBase(raw: String?): String {
-        var base = raw?.trim() ?: ""
-        if (base.isEmpty()) throw IOException("请填写同步服务器地址")
-        if (!base.startsWith("http://") && !base.startsWith("https://")) {
-            base = "http://$base"
-        }
-        while (base.endsWith("/")) base = base.substring(0, base.length - 1)
-        val parsed = URL(base)
-        if (parsed.host.isNullOrEmpty()) {
-            throw IOException("同步服务器地址无效")
-        }
-        return base
-    }
-
-    @Throws(IOException::class)
-    private fun sameOriginUrl(baseUrl: URL, relative: String?, label: String): URL {
-        var path = relative?.trim() ?: ""
+    private fun remotePath(relative: String?, label: String): String {
+        var path = relative?.trim().orEmpty()
         if (path.startsWith("/")) path = path.substring(1)
         if (path.isEmpty() ||
             path.contains("..") ||
             path.contains("://") ||
-            path.contains("\\")
+            path.contains("\\") ||
+            path.contains("?") ||
+            path.contains("#") ||
+            path.contains("\u0000")
         ) {
             throw IOException("$label 路径非法")
         }
-        var base = baseUrl.toString()
-        while (base.endsWith("/")) base = base.substring(0, base.length - 1)
-        val url = URL("$base/$path")
-        if (!baseUrl.protocol.equals(url.protocol, ignoreCase = true) ||
-            !baseUrl.authority.equals(url.authority, ignoreCase = true)
-        ) {
-            throw IOException("$label 必须和同步服务器同源")
+        if (path.split('/').any { it.isEmpty() }) {
+            throw IOException("$label 路径非法")
         }
-        return url
+        return "/$path"
     }
 
     @Throws(IOException::class)
@@ -629,90 +606,6 @@ internal object BundleInstaller {
     }
 
     @Throws(IOException::class)
-    private fun httpGetText(
-        url: URL,
-        token: String,
-        label: String,
-        maxBytes: Long,
-    ): String = String(httpGetBytes(url, token, label, maxBytes), StandardCharsets.UTF_8)
-
-    @Throws(IOException::class)
-    private fun httpGetBytes(
-        url: URL,
-        token: String,
-        label: String,
-        maxBytes: Long,
-    ): ByteArray {
-        val conn = openConnection(url, token, "application/json")
-        try {
-            val status = conn.responseCode
-            if (status != 200) {
-                throw IOException("$label 返回 HTTP $status" + errorSnippet(conn))
-            }
-            conn.inputStream.use { input ->
-                return readAll(input, maxBytes)
-            }
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    @Throws(IOException::class)
-    private fun httpDownload(
-        url: URL,
-        token: String,
-        destination: File,
-        maxBytes: Long,
-        label: String,
-    ): Long {
-        val conn = openConnection(url, token, "application/zip")
-        try {
-            val status = conn.responseCode
-            if (status != 200) {
-                throw IOException("$label 返回 HTTP $status" + errorSnippet(conn))
-            }
-            val contentLength = conn.contentLengthLong
-            if (contentLength > maxBytes) {
-                throw IOException("$label 超过大小上限")
-            }
-
-            var total = 0L
-            val buffer = ByteArray(16 * 1024)
-            BufferedInputStream(conn.inputStream).use { input ->
-                FileOutputStream(destination).use { out ->
-                    var read = input.read(buffer)
-                    while (read != -1) {
-                        total += read
-                        if (total > maxBytes) {
-                            throw IOException("$label 超过大小上限")
-                        }
-                        out.write(buffer, 0, read)
-                        read = input.read(buffer)
-                    }
-                    out.flush()
-                }
-            }
-            return total
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    @Throws(IOException::class)
-    private fun openConnection(
-        url: URL,
-        token: String,
-        accept: String,
-    ): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
-        connectTimeout = CONNECT_TIMEOUT_MS
-        readTimeout = READ_TIMEOUT_MS
-        requestMethod = "GET"
-        setRequestProperty("accept", accept)
-        setRequestProperty("x-sync-token", token)
-        useCaches = false
-    }
-
-    @Throws(IOException::class)
     private fun copyLimited(input: InputStream, out: OutputStream, limit: Long): Long {
         val buffer = ByteArray(16 * 1024)
         var total = 0L
@@ -766,17 +659,6 @@ internal object BundleInstaller {
             out.append(String.format(Locale.US, "%02x", b.toInt() and 0xff))
         }
         return out.toString()
-    }
-
-    private fun errorSnippet(conn: HttpURLConnection): String {
-        val err = conn.errorStream ?: return ""
-        return try {
-            val data = readAll(err, 512)
-            val text = String(data, StandardCharsets.UTF_8).trim()
-            if (text.isEmpty()) "" else "：$text"
-        } catch (_: IOException) {
-            ""
-        }
     }
 
     private fun shorten(text: String?, max: Int): String {

@@ -3,8 +3,7 @@ package com.example.hybriddebug
 object DevShellConfig {
 
     const val DEFAULT_PROD_URL = "http://10.0.2.2:8080"
-    const val DEFAULT_SYNC_URL = "http://10.0.2.2:9090"
-    const val DEFAULT_SYNC_TOKEN = "demo-sync-token"
+    const val DEFAULT_SYNC_URL = "tcp://10.0.2.2:9090"
 
     /** Simulates the token native obtains from its login API. */
     const val NATIVE_TOKEN = "native-demo-token"

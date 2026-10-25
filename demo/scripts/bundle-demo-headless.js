@@ -24,9 +24,9 @@ function printStatus(status) {
   console.log('Bundle Sync Demo (headless)');
   console.log(`  production page : ${status.prodUrl}`);
   console.log(`  Android emu prod: ${status.prodEmulatorUrl}`);
-  console.log(`  bundle server   : ${status.bundleServerUrl}`);
-  console.log(`  emulator sync   : ${status.bundleServerEmulatorUrl}`);
-  console.log(`  sync token      : ${status.syncToken}`);
+  console.log(`  pair page       : ${status.bundleServerUrl}`);
+  console.log(`  bundle TCP sync : ${status.bundleTcpUrl}`);
+  console.log(`  emulator sync   : ${status.bundleTcpEmulatorUrl}`);
   console.log(`  build source    : ${status.sourceLabel || '—'}`);
   console.log(`  latest          : ${status.latest ? status.latest.version : '(none)'}`);
   console.log('');

@@ -113,7 +113,7 @@
       : '无（还没有可对比的旧版本）';
     $('latest-sha').textContent = latest.sha256 || '—';
     $('latest-url').textContent =
-      `${status.bundleServerUrl}/${latest.bundle}?token=…`;
+      `${status.bundleTcpUrl || status.bundleServerUrl}/${latest.bundle}`;
     const files = latest.files && latest.files.length ? latest.files : [];
     $('file-list').textContent = files.length
       ? files.map((file) => `· ${file}`).join('\n')
@@ -140,7 +140,6 @@
 
     $('pair-link').textContent = status.pairLink || '—';
     $('emulator-link').textContent = status.pairLinkEmulator || '—';
-    $('sync-token').textContent = status.syncToken || '—';
     $('lan-warning').hidden = !status.lanIpIsLoopback;
     $('build-state').textContent = status.building
       ? 'building…'

@@ -9,7 +9,7 @@
 
 > 这是用于演示原理的工程，不是生产实现。真实方案（HTTPS + Whistle + VSCode 插件/桌面端）见 [`../SELECTION.md`](../SELECTION.md)。
 
-> **另一个 demo：包同步 + 增量补丁。** 不配 Wi-Fi 代理，手机从电脑下载带 SHA-256 校验的 Web 包；有旧版本时只下载变化的文件，补丁失败自动回退完整包。仍然用生产 origin 加载本地文件。构建 source 可以是纯静态目录，也可以切换到真实的 React + Vite 工程（[`web-react/`](web-react)）。见 [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md)。
+> **另一个 demo：包同步 + 增量补丁。** 不配 Wi-Fi 代理，手机经自定义 TCP 从电脑下载带 SHA-256 校验的 Web 包（同一端口还提供 HTTP 配对页）；有旧版本时只下载变化的文件，补丁失败自动回退完整包。仍然用生产 origin 加载本地文件。构建 source 可以是纯静态目录，也可以切换到真实的 React + Vite 工程（[`web-react/`](web-react)）。见 [`BUNDLE_SYNC.md`](BUNDLE_SYNC.md)。
 
 ![桌面控制台](docs/desktop-console.png)
 
